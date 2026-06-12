@@ -1,12 +1,14 @@
 import autogen
 from rich import print
 import chainlit as cl
+import uuid
 from typing import Annotated
 from chainlit.input_widget import (
    Select, Slider, Switch)
 from autogen import AssistantAgent
 from src.agents import ChainlitUserProxyAgent, ChainlitAssistantAgent
 from graphrag.query.cli import run_global_search, run_local_search
+from src.adapters.db import DatabaseManager
 
 # Ollama LLM for Agents
 llm_config_autogen = {
@@ -79,12 +81,52 @@ async def on_chat_start():
     cl.user_session.set("Query Agent", user_proxy)
     cl.user_session.set("Retriever", retriever)
 
-    msg = cl.Message(content=f"""Hello! What task would you like to get done today?      
-                     """, 
-                     author="User_Proxy")
-    await msg.send()
+    # Initialize SQLite database manager
+    db_mgr = DatabaseManager()
+    await db_mgr.initialize()
+    cl.user_session.set("db_mgr", db_mgr)
 
-    print("Message sent.")
+    # Check for existing sessions
+    sessions = await db_mgr.list_sessions()
+    session_id = None
+
+    if sessions:
+        # Ask user if they wish to resume the last active session
+        actions = [
+            cl.Action(name="resume_chat", value=sessions[0]["session_id"], label="🔄 Resume Last Chat"),
+            cl.Action(name="new_chat", value="new", label="➕ Start New Chat")
+        ]
+        res = await cl.AskActionMessage(
+            content="We found a previous chat session. Would you like to resume it or start a new one?",
+            actions=actions
+        ).send()
+        
+        if res and res.get("value") == "new":
+            session_id = str(uuid.uuid4())
+            await db_mgr.create_session(session_id, f"Session - {session_id[:8]}")
+            cl.user_session.set("chat_session_id", session_id)
+            msg = cl.Message(content="Hello! What task would you like to get done today?", author="User_Proxy")
+            await msg.send()
+        else:
+            session_id = res.get("value") if res else sessions[0]["session_id"]
+            cl.user_session.set("chat_session_id", session_id)
+            history = await db_mgr.get_session_messages(session_id)
+            
+            await cl.Message(content="*Resuming previous chat history...*").send()
+            for msg in history:
+                await cl.Message(
+                    content=msg["content"],
+                    author=msg["sender"]
+                ).send()
+    else:
+        # Start a brand new session
+        session_id = str(uuid.uuid4())
+        await db_mgr.create_session(session_id, f"Session - {session_id[:8]}")
+        cl.user_session.set("chat_session_id", session_id)
+        msg = cl.Message(content="Hello! What task would you like to get done today?", author="User_Proxy")
+        await msg.send()
+
+    print("Session ready.")
     
   except Exception as e:
     print("Error: ", e)
@@ -113,7 +155,13 @@ async def run_conversation(message: cl.Message):
 
     retriever   = cl.user_session.get("Retriever")
     user_proxy  = cl.user_session.get("Query Agent")
+    db_mgr      = cl.user_session.get("db_mgr")
+    session_id  = cl.user_session.get("chat_session_id")
     print("Setting groupchat")
+
+    # Save initial user message to database
+    if db_mgr and session_id:
+        await db_mgr.save_message(session_id, sender="User", role="user", content=CONTEXT)
 
     def state_transition(last_speaker: autogen.Agent, groupchat: autogen.GroupChat) -> autogen.Agent | None:
         if last_speaker is user_proxy:
@@ -167,3 +215,13 @@ async def run_conversation(message: cl.Message):
       await cl.make_async(user_proxy.send)( manager, message=CONTEXT, )
     elif len(groupchat.messages) == MAX_ITER:  
       await cl.make_async(user_proxy.send)( manager, message="exit", )
+
+    # Save agent and retriever messages generated during this turn
+    if db_mgr and session_id:
+        for m in groupchat.messages[1:]:
+            content = m.get("content", "")
+            if content.strip() == "TERMINATE" or not content.strip():
+                continue
+            sender = m.get("name") or m.get("sender", "Agent")
+            role = m.get("role", "assistant")
+            await db_mgr.save_message(session_id, sender=sender, role=role, content=content)
