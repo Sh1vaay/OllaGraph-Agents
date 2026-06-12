@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OllaGraph 3D Knowledge Graph Visualizer</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #09090e;
+            color: #f5f5f7;
+        }
+
+        /* macOS-Style Desktop wallpaper blur backdrop */
+        body::before {
+            content: "";
+            position: fixed;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(at 15% 15%, rgba(120, 50, 190, 0.16) 0px, transparent 55%),
+                        radial-gradient(at 85% 15%, rgba(20, 115, 230, 0.16) 0px, transparent 55%),
+                        radial-gradient(at 50% 85%, rgba(240, 80, 160, 0.09) 0px, transparent 55%);
+            z-index: -1;
+            filter: blur(110px);
+            pointer-events: none;
+        }
+
+        /* 3D Canvas container */
+        #3d-graph {
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* macOS Glass Floating Control Dashboard */
+        .dashboard {
+            position: absolute;
+            top: 24px;
+            left: 24px;
+            width: 320px;
+            background: rgba(22, 22, 32, 0.5);
+            backdrop-filter: blur(30px);
+            -webkit-backdrop-filter: blur(30px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 20px;
+            box-shadow: 0 16px 45px rgba(0, 0, 0, 0.45);
+            padding: 20px;
+            z-index: 10;
+        }
+
+        /* macOS Title Bar style */
+        .window-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+            position: relative;
+            padding-left: 56px;
+            height: 20px;
+        }
+
+        .traffic-lights::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 4px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ff5f56;
+            box-shadow: 20px 0 0 #ffbd2e, 40px 0 0 #27c93f;
+            opacity: 0.95;
+        }
+
+        .window-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #a1a1a6;
+            letter-spacing: 0.2px;
+        }
+
+        h2 {
+            margin: 0 0 8px 0;
+            font-size: 18px;
+            font-weight: 500;
+            color: #ffffff;
+        }
+
+        p {
+            margin: 0 0 16px 0;
+            font-size: 12px;
+            color: #a1a1a6;
+            line-height: 1.4;
+        }
+
+        .control-group {
+            margin-bottom: 16px;
+        }
+
+        label {
+            display: block;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: #86868b;
+            margin-bottom: 6px;
+            letter-spacing: 0.5px;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 8px 12px;
+            color: #ffffff;
+            font-size: 13px;
+            box-sizing: border-box;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        input[type="text"]:focus {
+            border-color: #007aff;
+            background: rgba(255, 255, 255, 0.08);
+            box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.2);
+        }
+
+        /* macOS Spotlight Info Tooltip Card */
+        .info-card {
+            position: absolute;
+            bottom: 24px;
+            left: 24px;
+            right: 24px;
+            background: rgba(22, 22, 32, 0.65);
+            backdrop-filter: blur(35px);
+            -webkit-backdrop-filter: blur(35px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+            padding: 20px;
+            z-index: 10;
+            max-height: 200px;
+            overflow-y: auto;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            opacity: 0;
+            transform: translateY(20px);
+            pointer-events: none;
+        }
+
+        .info-card.active {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: auto;
+        }
+
+        .info-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #ffffff;
+            margin-bottom: 6px;
+        }
+
+        .info-tag {
+            display: inline-block;
+            background: rgba(0, 122, 255, 0.15);
+            color: #0a84ff;
+            font-size: 10px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+        }
+
+        .info-desc {
+            font-size: 13px;
+            color: #e5e5ea;
+            line-height: 1.5;
+        }
+
+        /* Legend badges */
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 10px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            font-size: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 4px 8px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .legend-color {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+    </style>
+    <!-- 3D Force Graph Library CDN -->
+    <script src="https://unpkg.com/3d-force-graph"></script>
+</head>
+<body>
+    <div class="dashboard">
+        <div class="window-header">
+            <div class="traffic-lights"></div>
+            <div class="window-title">OllaGraph Visualizer</div>
+        </div>
+        <h2>Knowledge Graph</h2>
+        <p>Interactive 3D representation of extracted entities and connection weights. Drag to rotate, scroll to zoom, hover to inspect.</p>
+        
+        <div class="control-group">
+            <label for="search-input">Search Nodes</label>
+            <input type="text" id="search-input" placeholder="Type entity name...">
+        </div>
+
+        <div class="control-group">
+            <label>Entity Types</label>
+            <div class="legend" id="type-legend">
+                <!-- Dynamically populated -->
+            </div>
+        </div>
+    </div>
+
+    <div class="info-card" id="info-card">
+        <div class="info-title" id="node-title">Entity Name</div>
+        <span class="info-tag" id="node-type">Type</span>
+        <div class="info-desc" id="node-desc">Hover over a node to read description.</div>
+    </div>
+
+    <div id="3d-graph"></div>
+
+    <script>
+        const infoCard = document.getElementById('info-card');
+        const nodeTitle = document.getElementById('node-title');
+        const nodeType = document.getElementById('node-type');
+        const nodeDesc = document.getElementById('node-desc');
+        const searchInput = document.getElementById('search-input');
+        const legendContainer = document.getElementById('type-legend');
+
+        // Apple styling palettes
+        const colors = [
+            '#30d158', // Green
+            '#0a84ff', // Blue
+            '#bf5af2', // Purple
+            '#ff9f0a', // Orange
+            '#ff453a', // Red
+            '#64d2ff', // Cyan
+            '#ffd60a'  // Yellow
+        ];
+
+        let typeColorMap = {};
+        let nextColorIdx = 0;
+
+        function getTypeColor(type) {
+            if (!typeColorMap[type]) {
+                typeColorMap[type] = colors[nextColorIdx % colors.length];
+                nextColorIdx++;
+                
+                // Add to legend
+                const legendItem = document.createElement('div');
+                legendItem.className = 'legend-item';
+                legendItem.innerHTML = `
+                    <span class="legend-color" style="background: ${typeColorMap[type]}"></span>
+                    <span>${type}</span>
+                `;
+                legendContainer.appendChild(legendItem);
+            }
+            return typeColorMap[type];
+        }
+
+        // Initialize 3D Force-Directed Graph
+        const Graph = ForceGraph3D()(document.getElementById('3d-graph'))
+            .jsonUrl('graph_data.json')
+            .nodeLabel(node => `<span style="font-family:sans-serif;font-weight:600;color:#ffffff;background:rgba(0,0,0,0.85);padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);">${node.label}</span>`)
+            .nodeColor(node => getTypeColor(node.type))
+            .nodeVal(node => Math.max(1, node.val))
+            .linkWidth(link => Math.min(6, Math.max(1, link.weight * 1.5)))
+            .linkColor(() => 'rgba(255, 255, 255, 0.15)')
+            .onNodeHover(node => {
+                if (node) {
+                    nodeTitle.innerText = node.label;
+                    nodeType.innerText = node.type;
+                    nodeType.style.background = getTypeColor(node.type) + '25';
+                    nodeType.style.color = getTypeColor(node.type);
+                    nodeDesc.innerText = node.description || 'No description available.';
+                    infoCard.classList.add('active');
+                } else {
+                    infoCard.classList.remove('active');
+                }
+            })
+            .onNodeClick(node => {
+                // Focus camera on node
+                const distance = 40;
+                const distRatio = 1 + distance/Math.hypot(node.x, node.y, node.z);
+                Graph.cameraPosition(
+                    { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio }, // new pos
+                    node, // lookAt
+                    3000  // transition duration (ms)
+                );
+            });
+
+        // Search Input filter
+        searchInput.addEventListener('input', e => {
+            const val = e.target.value.toLowerCase().trim();
+            const { nodes } = Graph.graphData();
+            
+            if (!val) {
+                // Restore node values
+                nodes.forEach(n => n.__color = null);
+                Graph.nodeColor(n => getTypeColor(n.type));
+                return;
+            }
+
+            nodes.forEach(node => {
+                const isMatch = node.label.toLowerCase().includes(val);
+                if (isMatch) {
+                    node.__color = getTypeColor(node.type);
+                } else {
+                    node.__color = 'rgba(255, 255, 255, 0.05)';
+                }
+            });
+            Graph.nodeColor(node => node.__color);
+        });
+    </script>
+</body>
+</html>

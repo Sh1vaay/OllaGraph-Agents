@@ -1,6 +1,8 @@
 # OllaGraph-Agents
 
-Welcome to the OllaGraph-Agents interface! This application combines Microsoft AutoGen agents and GraphRAG knowledge graphs, all running locally via Ollama.
+Welcome to the OllaGraph-Agents workspace! This application combines Microsoft AutoGen agents and GraphRAG knowledge graphs, all running locally via Ollama.
+
+🌐 **[Open Interactive 3D Graph Visualizer](/public/graph_visualizer.html)**
 
 ### Features
 - **Agentic RAG:** AutoGen agents query your GraphRAG knowledge base.

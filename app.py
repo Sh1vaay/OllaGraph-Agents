@@ -44,7 +44,7 @@ async def run_indexing_pipeline(files, db_mgr, chroma_mgr, session_id):
         if not new_or_changed_files:
             await status_msg.update(content="ℹ️ *All uploaded documents are already indexed and up-to-date. Skipping indexing.*")
             # Trigger greeting so conversation can start
-            msg = cl.Message(content="Hello! What task would you like to get done today?", author="User_Proxy")
+            msg = cl.Message(content="Hello! What task would you like to get done today?\n\n🌐 *Tip: Visualizer is ready. [Open 3D Graph Visualizer](/public/graph_visualizer.html)*", author="User_Proxy")
             await msg.send()
             return
 
@@ -110,6 +110,7 @@ async def run_indexing_pipeline(files, db_mgr, chroma_mgr, session_id):
         if parquet_path:
             success = await cl.make_async(chroma_mgr.sync_entities_from_parquet)(parquet_path)
             if success:
+                await cl.make_async(chroma_mgr.export_graph_to_json)()
                 await status_msg.update(content="🎉 *Workspace successfully indexed! ChromaDB and GraphRAG are synchronized and ready to query.*")
             else:
                 await status_msg.update(content="⚠️ *Indexing complete, but ChromaDB synchronization failed.*")
@@ -117,7 +118,7 @@ async def run_indexing_pipeline(files, db_mgr, chroma_mgr, session_id):
             await status_msg.update(content="⚠️ *Indexing complete, but could not locate the output parquet files.*")
 
         # Prompt greeting message after successful indexing
-        msg = cl.Message(content="Hello! What task would you like to get done today?", author="User_Proxy")
+        msg = cl.Message(content="Hello! What task would you like to get done today?\n\n🌐 *Tip: Visualizer is ready. [Open 3D Graph Visualizer](/public/graph_visualizer.html)*", author="User_Proxy")
         await msg.send()
 
     except Exception as e:
@@ -276,6 +277,7 @@ async def on_chat_start():
     parquet_path = chroma_mgr.get_latest_output_parquet()
     if parquet_path:
         await cl.make_async(chroma_mgr.sync_entities_from_parquet)(parquet_path)
+        await cl.make_async(chroma_mgr.export_graph_to_json)()
 
     # Check for existing sessions
     sessions = await db_mgr.list_sessions()
@@ -309,7 +311,7 @@ async def on_chat_start():
             if files:
                 asyncio.create_task(run_indexing_pipeline(files, db_mgr, chroma_mgr, session_id))
             else:
-                msg = cl.Message(content="Hello! What task would you like to get done today?", author="User_Proxy")
+                msg = cl.Message(content="Hello! What task would you like to get done today?\n\n🌐 *Tip: Visualizer is ready. [Open 3D Graph Visualizer](/public/graph_visualizer.html)*", author="User_Proxy")
                 await msg.send()
         else:
             session_id = res.get("value") if res else sessions[0]["session_id"]
@@ -340,7 +342,7 @@ async def on_chat_start():
         if files:
             asyncio.create_task(run_indexing_pipeline(files, db_mgr, chroma_mgr, session_id))
         else:
-            msg = cl.Message(content="Hello! What task would you like to get done today?", author="User_Proxy")
+            msg = cl.Message(content="Hello! What task would you like to get done today?\n\n🌐 *Tip: Visualizer is ready. [Open 3D Graph Visualizer](/public/graph_visualizer.html)*", author="User_Proxy")
             await msg.send()
 
     print("Session ready.")
