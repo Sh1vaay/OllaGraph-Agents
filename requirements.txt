@@ -1,0 +1,7 @@
+ollama>=0.4.0
+pyautogen>=0.13.0
+tiktoken
+chainlit>=1.1.0
+graphrag>=0.3.0
+marker-pdf
+torch

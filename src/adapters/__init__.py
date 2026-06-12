@@ -1,0 +1,1 @@
+# GraphRAG Compatibility Adapters

@@ -1,0 +1,44 @@
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+ActiveState.venv/
+
+# Python Caching, Builds, and Distribution
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# Local Data & Logs (GraphRAG outputs)
+input/
+output/
+cache/
+db/
+*.log
+logs/
+
+# Configuration & Secrets
+.env
+.env.*
+settings.yaml
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+.project
+.pydevproject
+.settings/
+
+# Operating System Files
+.DS_Store
+Thumbs.db
