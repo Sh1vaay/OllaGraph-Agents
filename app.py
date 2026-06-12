@@ -10,19 +10,83 @@ from src.agents import ChainlitUserProxyAgent, ChainlitAssistantAgent
 from graphrag.query.cli import run_global_search, run_local_search
 from src.adapters.db import DatabaseManager
 
-# Ollama LLM for Agents
-llm_config_autogen = {
-    "seed": 42,  # change the seed for different trials
+import requests
+import ollama
+
+def get_optimal_models() -> tuple[str, str]:
+    try:
+        res = requests.get("http://localhost:11434/api/tags", timeout=2)
+        if res.status_code == 200:
+            models = [m["name"].split(":")[0] for m in res.json().get("models", [])]
+            
+            # Prefer llama3 or mistral for heavy reasoning
+            heavy = "llama3"
+            for h in ["llama3", "mistral", "llama3.1"]:
+                if h in models:
+                    heavy = h
+                    break
+                    
+            # Prefer gemma, phi3, or qwen for fast chat
+            fast = heavy
+            for f in ["phi3", "gemma", "gemma2", "qwen", "qwen2"]:
+                if f in models:
+                    fast = f
+                    break
+            return heavy, fast
+    except Exception:
+        pass
+    return "llama3", "llama3"
+
+HEAVY_MODEL, FAST_MODEL = get_optimal_models()
+print(f"Optimal Models Detected - Heavy: {HEAVY_MODEL}, Fast: {FAST_MODEL}")
+
+# Ollama LLM Configs for Heavy and Fast models
+llm_config_heavy = {
+    "seed": 42,
     "temperature": 0,
     "config_list": [
         {
-            "model": "llama3",
+            "model": HEAVY_MODEL,
             "base_url": "http://localhost:11434/v1",
             "api_key": "ollama",
         }
     ],
     "timeout": 60000,
 }
+
+llm_config_fast = {
+    "seed": 42,
+    "temperature": 0.1,
+    "config_list": [
+        {
+            "model": FAST_MODEL,
+            "base_url": "http://localhost:11434/v1",
+            "api_key": "ollama",
+        }
+    ],
+    "timeout": 30000,
+}
+
+async def detect_query_intent(query: str) -> str:
+    """Classifies user prompt intent to bypass expensive GraphRAG indexing calls for chit-chat."""
+    try:
+        response = await ollama.AsyncClient().generate(
+            model=FAST_MODEL,
+            system="Classify the user query as 'SEARCH' (if it asks for factual knowledge, document data, files, or specific retrieval) or 'CONVERSATIONAL' (if it is a greeting, chit-chat, or general follow-up). Output only the single word: SEARCH or CONVERSATIONAL.",
+            prompt=query,
+            options={"temperature": 0.0, "num_predict": 5}
+        )
+        intent = response.get("response", "").strip().upper()
+        if "CONVERSATIONAL" in intent:
+            return "CONVERSATIONAL"
+        return "SEARCH"
+    except Exception:
+        # Robust regex-based fallback classification
+        conversational_keywords = {"hi", "hello", "hey", "who are you", "what is your name", "exit", "quit", "thanks", "thank you"}
+        words = set(query.lower().strip().split())
+        if words.intersection(conversational_keywords):
+            return "CONVERSATIONAL"
+        return "SEARCH"
 
 @cl.on_chat_start
 async def on_chat_start():
@@ -58,7 +122,7 @@ async def on_chat_start():
 
     retriever   = AssistantAgent(
        name="Retriever", 
-       llm_config=llm_config_autogen, 
+       llm_config=llm_config_heavy, 
        system_message="""Only execute the function query_graphRAG to look for context. 
                     Output 'TERMINATE' when an answer has been provided.""",
        max_consecutive_auto_reply=1,
@@ -66,13 +130,20 @@ async def on_chat_start():
        description="Retriever Agent"
      )
 
+    chatter = AssistantAgent(
+       name="Chatter",
+       llm_config=llm_config_fast,
+       system_message="""You are a helpful local assistant. Respond to greetings, small talk, and general queries directly and concisely. Do not attempt to query the graph database.""",
+       description="Conversational Agent"
+    )
+
     user_proxy = ChainlitUserProxyAgent(
         name="User_Proxy",
         human_input_mode="ALWAYS",
-        llm_config=llm_config_autogen,
+        llm_config=llm_config_fast,
         is_termination_msg=lambda x: x.get("content", "").rstrip().endswith("TERMINATE"),
         code_execution_config=False,
-        system_message='''A human admin. Interact with the retriever to provide any context''',
+        system_message='''A human admin. Interact with the retriever or chatter to provide context.''',
         description="User Proxy Agent"
     )
     
@@ -80,6 +151,7 @@ async def on_chat_start():
 
     cl.user_session.set("Query Agent", user_proxy)
     cl.user_session.set("Retriever", retriever)
+    cl.user_session.set("Chatter", chatter)
 
     # Initialize SQLite database manager
     db_mgr = DatabaseManager()
@@ -154,6 +226,7 @@ async def run_conversation(message: cl.Message):
     LOCAL_SEARCH = cl.user_session.get("Search_type")
 
     retriever   = cl.user_session.get("Retriever")
+    chatter     = cl.user_session.get("Chatter")
     user_proxy  = cl.user_session.get("Query Agent")
     db_mgr      = cl.user_session.get("db_mgr")
     session_id  = cl.user_session.get("chat_session_id")
@@ -163,10 +236,21 @@ async def run_conversation(message: cl.Message):
     if db_mgr and session_id:
         await db_mgr.save_message(session_id, sender="User", role="user", content=CONTEXT)
 
+    # Classify intent to route query to correct agent group and model tier
+    intent = await detect_query_intent(CONTEXT)
+    print(f"Query Intent: {intent}")
+
+    if intent == "CONVERSATIONAL":
+        active_agents = [user_proxy, chatter]
+        manager_config = llm_config_fast
+    else:
+        active_agents = [user_proxy, retriever]
+        manager_config = llm_config_heavy
+
     def state_transition(last_speaker: autogen.Agent, groupchat: autogen.GroupChat) -> autogen.Agent | None:
         if last_speaker is user_proxy:
-            return retriever
-        if last_speaker is retriever:
+            return retriever if retriever in groupchat.agents else chatter
+        if last_speaker in (retriever, chatter):
             return user_proxy
         return None
 
@@ -196,14 +280,14 @@ async def run_conversation(message: cl.Message):
     )
 
     groupchat = autogen.GroupChat(
-        agents=[user_proxy, retriever],
+        agents=active_agents,
         messages=[],
         max_round=MAX_ITER,
         speaker_selection_method=state_transition,
         allow_repeat_speaker=True,
     )
     manager = autogen.GroupChatManager(groupchat=groupchat,
-                                       llm_config=llm_config_autogen, 
+                                       llm_config=manager_config, 
                                        is_termination_msg=lambda x: x.get("content", "") and x.get("content", "").rstrip().endswith("TERMINATE"),
                                        code_execution_config=False,
                                        )    
