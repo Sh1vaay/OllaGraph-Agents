@@ -64,7 +64,7 @@ sequenceDiagram
         RAG->>RAG: Retrieve neighboring entity nodes & summaries
     else Global Search Mode
         RAG->>RAG: Retrieve community reports & summaries
-    fi
+    end
     RAG->>Ollama: Synthesize retrieved context into answer
     Ollama-->>RAG: Return summarized context
     RAG-->>Agent: Return retrieved search text
