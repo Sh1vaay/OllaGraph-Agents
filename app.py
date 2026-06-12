@@ -5,6 +5,7 @@ import uuid
 import os
 import shutil
 import asyncio
+import hashlib
 from typing import Annotated
 from chainlit.input_widget import (
    Select, Slider, Switch)
@@ -16,37 +17,68 @@ from src.adapters.vector_store import ChromaManager
 import requests
 import ollama
 
+def calculate_md5(filepath: str) -> str:
+    """Computes MD5 checksum of a file to check for content modifications."""
+    hash_md5 = hashlib.md5()
+    with open(filepath, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_md5.update(chunk)
+    return hash_md5.hexdigest()
+
 async def run_indexing_pipeline(files, db_mgr, chroma_mgr, session_id):
     try:
         # Create directories
         os.makedirs("input/pdfs", exist_ok=True)
         os.makedirs("input/markdown", exist_ok=True)
 
-        status_msg = await cl.Message(content="📥 *Saving uploaded files to disk...*", author="System").send()
+        status_msg = await cl.Message(content="🔍 *Checking for document modifications (Incremental Engine)...*", author="System").send()
 
-        # Save files
+        # Compute MD5 hashes and find new or changed files
+        new_or_changed_files = []
         for f in files:
+            current_hash = calculate_md5(f.path)
+            stored_hash = await db_mgr.get_file_hash(f.name)
+            if stored_hash != current_hash:
+                new_or_changed_files.append((f, current_hash))
+
+        if not new_or_changed_files:
+            await status_msg.update(content="ℹ️ *All uploaded documents are already indexed and up-to-date. Skipping indexing.*")
+            # Trigger greeting so conversation can start
+            msg = cl.Message(content="Hello! What task would you like to get done today?", author="User_Proxy")
+            await msg.send()
+            return
+
+        # Notify which files are being indexed
+        file_list_str = ", ".join([f.name for f, _ in new_or_changed_files])
+        await status_msg.update(content=f"📥 *Processing new/changed files:* `{file_list_str}`\n*Saving files...*")
+
+        # Save files and update their stored hashes in database
+        has_pdfs = False
+        for f, file_hash in new_or_changed_files:
             dest_dir = "input/pdfs" if f.name.endswith(".pdf") else "input/markdown"
             dest_name = f.name
+            if f.name.endswith(".pdf"):
+                has_pdfs = True
             if f.name.endswith(".txt"):
                 dest_name = f.name[:-4] + ".md"
             
             dest_path = os.path.join(dest_dir, dest_name)
             shutil.copy(f.path, dest_path)
+            await db_mgr.update_file_hash(f.name, file_hash)
             
-        await status_msg.update(content="📑 *Files saved. Launching marker PDF-to-Markdown parser...*")
+        # Run PDF-to-Markdown parsing only if new PDF files are uploaded!
+        if has_pdfs:
+            await status_msg.update(content="📑 *PDF files detected. Launching marker parser...*")
+            proc = await asyncio.create_subprocess_exec(
+                "python3", "-m", "src.tools.pdf_to_markdown",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            stdout, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                print(f"pdf_to_markdown error: {stderr.decode()}")
 
-        # Run pdf_to_markdown converter
-        proc = await asyncio.create_subprocess_exec(
-            "python3", "-m", "src.tools.pdf_to_markdown",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            print(f"pdf_to_markdown error: {stderr.decode()}")
-            
-        await status_msg.update(content="⚡ *Parsing complete. Initiating GraphRAG Indexing (this may take a few minutes)...*")
+        await status_msg.update(content="⚡ *Initiating GraphRAG Indexing (this may take a few minutes)...*")
 
         # Run GraphRAG Indexing
         proc = await asyncio.create_subprocess_exec(
@@ -83,6 +115,10 @@ async def run_indexing_pipeline(files, db_mgr, chroma_mgr, session_id):
                 await status_msg.update(content="⚠️ *Indexing complete, but ChromaDB synchronization failed.*")
         else:
             await status_msg.update(content="⚠️ *Indexing complete, but could not locate the output parquet files.*")
+
+        # Prompt greeting message after successful indexing
+        msg = cl.Message(content="Hello! What task would you like to get done today?", author="User_Proxy")
+        await msg.send()
 
     except Exception as e:
         await cl.Message(content=f"❌ *An unexpected error occurred during indexing: {str(e)}*", author="System").send()

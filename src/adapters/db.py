@@ -42,6 +42,15 @@ class DatabaseManager:
                     FOREIGN KEY(session_id) REFERENCES chat_sessions(session_id) ON DELETE CASCADE
                 );
             """)
+
+            # Create Indexed Files Table for Incremental Indexing Engine
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS indexed_files (
+                    filepath TEXT PRIMARY KEY,
+                    file_hash TEXT NOT NULL,
+                    last_indexed TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
             await db.commit()
 
     async def create_session(self, session_id: str, session_name: str) -> None:
@@ -88,3 +97,20 @@ class DatabaseManager:
             """) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
+
+    async def get_file_hash(self, filepath: str) -> str | None:
+        """Retrieves the stored MD5 hash of an indexed file."""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute("SELECT file_hash FROM indexed_files WHERE filepath = ?;", (filepath,)) as cursor:
+                row = await cursor.fetchone()
+                return row[0] if row else None
+
+    async def update_file_hash(self, filepath: str, file_hash: str) -> None:
+        """Saves or updates the MD5 hash of an indexed file."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000;")
+            await db.execute("""
+                INSERT OR REPLACE INTO indexed_files (filepath, file_hash, last_indexed)
+                VALUES (?, ?, CURRENT_TIMESTAMP);
+            """, (filepath, file_hash))
+            await db.commit()
