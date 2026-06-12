@@ -9,6 +9,7 @@ from autogen import AssistantAgent
 from src.agents import ChainlitUserProxyAgent, ChainlitAssistantAgent
 from graphrag.query.cli import run_global_search, run_local_search
 from src.adapters.db import DatabaseManager
+from src.adapters.vector_store import ChromaManager
 
 import requests
 import ollama
@@ -158,6 +159,15 @@ async def on_chat_start():
     await db_mgr.initialize()
     cl.user_session.set("db_mgr", db_mgr)
 
+    # Initialize ChromaDB manager
+    chroma_mgr = ChromaManager()
+    cl.user_session.set("chroma_mgr", chroma_mgr)
+    
+    # Sync from latest parquet entities asynchronously if available
+    parquet_path = chroma_mgr.get_latest_output_parquet()
+    if parquet_path:
+        await cl.make_async(chroma_mgr.sync_entities_from_parquet)(parquet_path)
+
     # Check for existing sessions
     sessions = await db_mgr.list_sessions()
     session_id = None
@@ -258,6 +268,25 @@ async def run_conversation(message: cl.Message):
           question: Annotated[str, 'Query string containing information that you want from RAG search']
                           ) -> str:
         try:
+            # Query ChromaDB first for instant vector similarity matches
+            chroma_mgr = cl.user_session.get("chroma_mgr")
+            if chroma_mgr:
+                try:
+                    embed_res = await ollama.AsyncClient().embed(model="nomic-embed-text", input=question)
+                    query_embedding = embed_res["embeddings"][0]
+                    matched_entities = chroma_mgr.query_entities(query_embedding, top_k=5)
+                    if matched_entities:
+                        bullet_points = "\n".join([
+                            f"- **{e['name']}** ({e['type']}): {e['description'][:150]}..."
+                            for e in matched_entities
+                        ])
+                        await cl.Message(
+                            content=f"🔍 *ChromaDB matched entities:*\n\n{bullet_points}",
+                            author="ChromaDB"
+                        ).send()
+                except Exception as ve:
+                    print(f"ChromaDB lookup failed: {ve}")
+
             if LOCAL_SEARCH:
                 print(LOCAL_SEARCH)
                 result = run_local_search(INPUT_DIR, ROOT_DIR, COMMUNITY ,RESPONSE_TYPE, question)

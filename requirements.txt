@@ -6,3 +6,5 @@ graphrag>=0.3.0
 marker-pdf
 torch
 aiosqlite
+chromadb
+
