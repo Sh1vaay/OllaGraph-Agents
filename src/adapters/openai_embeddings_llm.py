@@ -9,8 +9,8 @@ from graphrag.llm.types import (
     LLMInput,
 )
 
-from .openai_configuration import OpenAIConfiguration
-from .types import OpenAIClientTypes
+from graphrag.llm.openai.openai_configuration import OpenAIConfiguration
+from graphrag.llm.openai.types import OpenAIClientTypes
 import ollama
 
 class OpenAIEmbeddingsLLM(BaseLLM[EmbeddingInput, EmbeddingOutput]):

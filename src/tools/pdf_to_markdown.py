@@ -100,9 +100,9 @@ def multiple():
         total_processes = int(total_processes)
 
     try:
-        mp.set_start_method('spawn') # Required for CUDA, forkserver doesn't work
+        mp.set_start_method('spawn', force=True) # Required for CUDA
     except RuntimeError:
-        raise RuntimeError("Set start method to spawn twice. This may be a temporary issue with the script. Please try running it again.")
+        pass
 
     if settings.TORCH_DEVICE == "mps" or settings.TORCH_DEVICE_MODEL == "mps":
         print("Cannot use MPS with torch multiprocessing share_memory. This will make things less memory efficient. If you want to share memory, you have to use CUDA or CPU.  Set the TORCH_DEVICE environment variable to change the device.")

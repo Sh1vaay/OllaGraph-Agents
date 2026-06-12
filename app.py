@@ -16,6 +16,7 @@ from src.adapters.db import DatabaseManager
 from src.adapters.vector_store import ChromaManager
 import requests
 import ollama
+import subprocess
 
 def calculate_md5(filepath: str) -> str:
     """Computes MD5 checksum of a file to check for content modifications."""

@@ -24,7 +24,7 @@ echo "[+] Ollama service is active and responsive."
 # Verify if target models are pulled
 for model in "llama3" "nomic-embed-text"; do
     # Match model name with or without tag suffix (e.g. llama3:latest or llama3)
-    if ! echo "$TAGS_RESPONSE" | grep -q "\"name\":\"${model}:"; then
+    if ! echo "$TAGS_RESPONSE" | grep -E -q "\"name\":\"${model}(:|\")"; then
         echo "[!] Warning: Model '${model}' was not found in your local Ollama list."
         echo "[+] Attempting to pull '${model}' automatically..."
         if ! ollama pull "${model}"; then

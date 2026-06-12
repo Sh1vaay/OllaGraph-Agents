@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OllaGraph macOS Chat Mockup</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            width: 100vw;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
+            background: radial-gradient(circle at 30% 20%, #7928ca 0%, #1e1358 45%, #05021a 100%);
+            overflow: hidden;
+        }
+
+        .window-container {
+            width: 820px;
+            height: 600px;
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(35px);
+            -webkit-backdrop-filter: blur(35px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 20px;
+            box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .window-header {
+            height: 52px;
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            position: relative;
+        }
+
+        .traffic-lights {
+            display: flex;
+            gap: 8px;
+            z-index: 10;
+        }
+
+        .dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .dot-red { background: #ff5f56; }
+        .dot-yellow { background: #ffbd2e; }
+        .dot-green { background: #27c93f; }
+
+        .window-title {
+            position: absolute;
+            left: 0;
+            right: 0;
+            text-align: center;
+            font-size: 13px;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.35);
+            pointer-events: none;
+        }
+
+        .chat-area {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            scroll-behavior: smooth;
+        }
+
+        /* Message wrappers containing avatar + bubble */
+        .message-row {
+            display: flex;
+            align-items: flex-end;
+            gap: 12px;
+            max-width: 75%;
+        }
+
+        .message-row.user {
+            align-self: flex-end;
+            flex-direction: row-reverse;
+        }
+
+        .message-row.assistant {
+            align-self: flex-start;
+        }
+
+        .avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+
+        .bubble {
+            padding: 12px 18px;
+            font-size: 13px;
+            line-height: 1.45;
+            color: #ffffff;
+        }
+
+        .user .bubble {
+            background: #007aff;
+            border-radius: 18px 18px 4px 18px;
+            box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
+        }
+
+        .assistant .bubble {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 18px 18px 18px 4px;
+        }
+
+        .time-label {
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.3);
+            margin-top: 4px;
+            display: block;
+            text-align: right;
+        }
+
+        .assistant .time-label {
+            text-align: left;
+        }
+
+        .input-container {
+            padding: 20px 24px 24px 24px;
+            background: rgba(0, 0, 0, 0.1);
+        }
+
+        .search-input-wrapper {
+            display: flex;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.04);
+            border: 2px solid rgba(0, 122, 255, 0.4);
+            box-shadow: 0 0 15px rgba(0, 122, 255, 0.25);
+            border-radius: 28px;
+            padding: 8px 18px;
+            gap: 12px;
+            transition: all 0.25s ease;
+        }
+
+        .search-input-wrapper:focus-within {
+            border-color: #007aff;
+            box-shadow: 0 0 20px rgba(0, 122, 255, 0.4);
+            background: rgba(255, 255, 255, 0.07);
+        }
+
+        .search-icon {
+            width: 18px;
+            height: 18px;
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        .send-icon {
+            width: 18px;
+            height: 18px;
+            color: #007aff;
+            cursor: pointer;
+            transition: transform 0.2s ease;
+        }
+
+        .send-icon:hover {
+            transform: scale(1.1);
+        }
+
+        input[type="text"] {
+            flex: 1;
+            background: transparent;
+            border: none;
+            outline: none;
+            color: #ffffff;
+            font-size: 14px;
+        }
+
+        input[type="text"]::placeholder {
+            color: rgba(255, 255, 255, 0.35);
+        }
+
+        /* Modal Overlay for startup choices */
+        .modal-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.45);
+            backdrop-filter: blur(15px);
+            -webkit-backdrop-filter: blur(15px);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            transition: opacity 0.3s ease;
+        }
+
+        .modal-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .modal-box {
+            width: 360px;
+            background: rgba(30, 30, 45, 0.65);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 18px;
+            padding: 24px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+            text-align: center;
+        }
+
+        .modal-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #ffffff;
+            margin-bottom: 8px;
+        }
+
+        .modal-desc {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.5);
+            line-height: 1.45;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            border-radius: 10px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 8px;
+        }
+
+        .btn-primary {
+            background: #007aff;
+            color: #ffffff;
+        }
+
+        .btn-primary:hover {
+            background: #006ce6;
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #ffffff;
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        /* Uploader overlay */
+        .dropzone {
+            border: 2px dashed rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            padding: 30px;
+            text-align: center;
+            cursor: pointer;
+            margin-bottom: 16px;
+            transition: border-color 0.2s;
+        }
+
+        .dropzone:hover {
+            border-color: #007aff;
+        }
+    </style>
+</head>
+<body>
+    <div class="window-container">
+        <div class="window-header">
+            <div class="traffic-lights">
+                <div class="dot dot-red"></div>
+                <div class="dot dot-yellow"></div>
+                <div class="dot dot-green"></div>
+            </div>
+            <div class="window-title">OllaGraph Workspace</div>
+        </div>
+
+        <div class="chat-area" id="chat-content">
+            <!-- Simulated starting message -->
+            <div class="message-row assistant">
+                <img class="avatar" src="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150" alt="Agent">
+                <div>
+                    <div class="bubble">
+                        Welcome to the OllaGraph-Agents workspace! I am your agent. Upload documents or start querying the graph.
+                    </div>
+                    <span class="time-label">9:15 AM</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="input-container">
+            <div class="search-input-wrapper">
+                <!-- Magnifying glass icon -->
+                <svg class="search-icon" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                <input type="text" id="chat-input" placeholder="Type a message...">
+                <!-- Send icon -->
+                <svg class="send-icon" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" onclick="sendMockMessage()"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+            </div>
+        </div>
+    </div>
+
+    <!-- Startup Dialog Overlay -->
+    <div class="modal-overlay" id="session-modal">
+        <div class="modal-box">
+            <div class="modal-title">Restore Chat Session</div>
+            <div class="modal-desc">We found an existing active session. Would you like to restore your database logs or start a new indexing workspace?</div>
+            <button class="btn btn-primary" onclick="resumeSession()">🔄 Resume Last Chat</button>
+            <button class="btn btn-secondary" onclick="newSession()">➕ Start New Chat</button>
+        </div>
+    </div>
+
+    <!-- Document Uploader Overlay -->
+    <div class="modal-overlay hidden" id="upload-modal">
+        <div class="modal-box" style="width: 420px;">
+            <div class="modal-title">Upload Documents to Index</div>
+            <div class="modal-desc">Add text or PDF documents to build a local knowledge graph.</div>
+            
+            <div class="dropzone" onclick="triggerFileInput()">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#007aff" stroke-width="2" style="margin-bottom: 8px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                <div style="font-size: 13px; font-weight: 500; color: #ffffff;">Drag & Drop files or Click</div>
+                <div id="selected-files" style="font-size: 11px; color: rgba(255,255,255,0.4); margin-top: 6px;">Supports .pdf, .txt</div>
+            </div>
+            
+            <input type="file" id="file-input" style="display: none;" multiple accept=".pdf,.txt" onchange="handleFileSelect(event)">
+            
+            <div style="display: flex; gap: 8px;">
+                <button class="btn btn-secondary" style="flex: 1;" onclick="closeUploader()">Cancel</button>
+                <button class="btn btn-primary" style="flex: 1;" onclick="startIndexing()">Start Indexing</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const chatContent = document.getElementById('chat-content');
+        const sessionModal = document.getElementById('session-modal');
+        const uploadModal = document.getElementById('upload-modal');
+        const chatInput = document.getElementById('chat-input');
+        const selectedFilesDiv = document.getElementById('selected-files');
+        let selectedFilesList = [];
+
+        function resumeSession() {
+            sessionModal.classList.add('hidden');
+            
+            appendMessage('assistant', 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150', '<em>Resuming previous chat history from SQLite...</em>');
+            
+            setTimeout(() => {
+                appendMessage('user', 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150', 'Hello, do you know about that message?');
+            }, 500);
+
+            setTimeout(() => {
+                appendMessage('assistant', 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150', 'Hello, agent is here to synthesize search details from the knowledge graph for you.');
+            }, 1200);
+        }
+
+        function newSession() {
+            sessionModal.classList.add('hidden');
+            uploadModal.classList.remove('hidden');
+        }
+
+        function triggerFileInput() {
+            document.getElementById('file-input').click();
+        }
+
+        function handleFileSelect(event) {
+            const files = event.target.files;
+            selectedFilesList = Array.from(files);
+            selectedFilesDiv.innerText = selectedFilesList.map(f => f.name).join(', ');
+        }
+
+        function closeUploader() {
+            uploadModal.classList.add('hidden');
+            appendMessage('assistant', 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150', 'No documents uploaded. Proceeding with existing knowledge base index.');
+        }
+
+        function startIndexing() {
+            uploadModal.classList.add('hidden');
+            appendMessage('assistant', 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150', '📥 <strong>Processing files...</strong>');
+            
+            setTimeout(() => {
+                appendMessage('assistant', 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150', '🎉 <strong>Workspace successfully indexed and synced to ChromaDB.</strong>');
+            }, 2000);
+        }
+
+        function appendMessage(sender, avatarUrl, text) {
+            const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const msgRow = document.createElement('div');
+            msgRow.className = `message-row ${sender}`;
+            
+            msgRow.innerHTML = `
+                <img class="avatar" src="${avatarUrl}" alt="${sender}">
+                <div>
+                    <div class="bubble">${text}</div>
+                    <span class="time-label">${timeStr}</span>
+                </div>
+            `;
+            chatContent.appendChild(msgRow);
+            chatContent.scrollTop = chatContent.scrollHeight;
+        }
+
+        function sendMockMessage() {
+            const val = chatInput.value.trim();
+            if (!val) return;
+
+            appendMessage('user', 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150', val);
+            chatInput.value = '';
+
+            setTimeout(() => {
+                appendMessage('assistant', 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150', 'This is a local mockup response matching the macOS Sonoma layout.');
+            }, 800);
+        }
+
+        chatInput.addEventListener('keypress', e => {
+            if (e.key === 'Enter') sendMockMessage();
+        });
+    </script>
+</body>
+</html>

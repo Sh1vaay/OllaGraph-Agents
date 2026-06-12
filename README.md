@@ -6,18 +6,18 @@
 [![GraphRAG Version](https://img.shields.io/badge/GraphRAG-0.3.0%2B-orange.svg)](https://github.com/microsoft/graphrag)
 [![Ollama Version](https://img.shields.io/badge/Ollama-0.4.0%2B-lightgrey.svg)](https://ollama.com/)
 
-A private, secure, and fully offline Retrieval-Augmented Generation (RAG) assistant. This application builds a structured knowledge graph from your local text documents using **Microsoft GraphRAG**, orchestrates cooperative multi-agent discussions using **AG2 (AutoGen)**, runs all inference locally via **Ollama**, and exposes a web chat client built on **Chainlit**.
+OllaGraph-Agents is a private, secure, and fully offline Retrieval-Augmented Generation (RAG) system. It builds a semantic knowledge graph from local documents using **Microsoft GraphRAG**, orchestrates multi-agent group discussions using **AG2 (AutoGen)**, manages persistent session state and hashes using **SQLite**, indexes entity descriptions locally in **ChromaDB**, runs all LLM inference via **Ollama**, and serves a gorgeous macOS Glassmorphism web client built on **Chainlit** including a **3D WebGL Force-Directed Graph Visualizer**.
 
 ---
 
 ## 📖 Table of Contents
 * [System Architecture](#-system-architecture)
 * [Application Flow](#-application-flow)
-* [Features](#-features)
+* [Key Features](#-key-features)
 * [Quick Start (Local Setup)](#-quick-start-local-setup)
 * [Configuration Guide](#-configuration-guide)
 * [Developer Experience](#-developer-experience)
-* [Security & Privacy](#-security--privacy)
+* [Security & Privacy Audit](#-security--privacy-audit)
 * [Performance & Optimization](#-performance--optimization)
 * [License](#-license)
 
@@ -25,98 +25,149 @@ A private, secure, and fully offline Retrieval-Augmented Generation (RAG) assist
 
 ## 🏗️ System Architecture
 
-The following diagram illustrates the components of the local RAG stack and the data flow between them:
+The following diagram illustrates the relationship between the front-end interface, local database modules, agent executors, and the Ollama service:
 
 ```mermaid
 graph TD
     User[User] -->|Interacts| UI[Chainlit Web UI]
-    UI -->|Passes Prompt| Agents[AutoGen Agent Group]
-    Agents -->|Retriever Agent| GraphRAG[GraphRAG Search Engine]
-    Agents -->|UserProxy Agent| UI
-    GraphRAG -->|Queries Context| KG[Local Knowledge Graph - Parquet/DB]
-    GraphRAG -->|Embeds Query| OllamaEmbed[Ollama Embeddings - nomic-embed-text]
-    Agents -->|Chat Completions| OllamaChat[Ollama LLM - llama3/mistral]
-    OllamaEmbed -->|Local Endpoint 11434| LocalHost[Localhost Services]
-    OllamaChat -->|Local Endpoint 11434| LocalHost
+    UI -->|Session Queries| DB[SQLite DB - Memory/WAL]
+    UI -->|Drag & Drop Docs| Index[Incremental Indexing Engine]
+    Index -->|Checksum Bypass| HashCheck{MD5 Hash Match?}
+    HashCheck -->|No| Marker[Marker PDF-to-MD]
+    Marker -->|Runs GraphRAG| GraphRAG[GraphRAG Indexer]
+    GraphRAG -->|Parquet Output| Sync[Vector & Graph Sync]
+    Sync -->|Sync Vectors| Chroma[ChromaDB Vector Store]
+    Sync -->|Export Nodes| GraphData[graph_data.json]
+    
+    UI -->|Open 3D Visualizer| WebGL[3D WebGL Graph Visualizer]
+    GraphData -->|Loads Structure| WebGL
+    
+    UI -->|Sends Message| Orchestrator[Multi-Model Intent Router]
+    Orchestrator -->|Conversational Intent| Chatter[Conversational Chatter Agent]
+    Orchestrator -->|factual/Search Intent| Retriever[GraphRAG Retriever Agent]
+    
+    Retriever -->|Similarity Query| Chroma
+    Retriever -->|Local/Global Search| GraphRAGSearch[GraphRAG Search Runner]
+    
+    Chatter -->|Fast LLM| OllamaChat[Ollama: gemma/phi3/qwen]
+    Retriever -->|Heavy LLM| OllamaReason[Ollama: llama3/mistral]
 ```
 
 ---
 
 ## 🔄 Application Flow
 
-The sequence of operations when answering a user question is detailed below:
+The sequence of operations when initiating a user session and routing queries is described below:
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor User
-    participant UI as "Chainlit UI"
+    participant UI as "Chainlit Web UI"
+    participant Router as "Intent Router"
     participant Agent as "AutoGen Agent Group"
-    participant RAG as "GraphRAG"
-    participant Ollama as "Ollama API (Local)"
+    participant Chroma as "ChromaDB Store"
+    participant RAG as "GraphRAG Search"
+    participant Ollama as "Ollama Local Service"
 
-    User->>UI: Submit Question/Query
-    UI->>Agent: Trigger Conversation Loop
-    Agent->>RAG: Invoke query_graphRAG Tool
-    alt Local Search Mode
-        RAG->>Ollama: Generate query embeddings
-        Ollama-->>RAG: Return float list
-        RAG->>RAG: Retrieve neighboring entity nodes & summaries
-    else Global Search Mode
-        RAG->>RAG: Retrieve community reports & summaries
+    User->>UI: Launch Application
+    UI->>UI: Check SQLite session history
+    alt Session History Exists
+        UI-->>User: Prompt "Resume Last Chat" or "Start New Chat"
+    else New Chat Selected
+        UI-->>User: Open Drag & Drop file uploader
+        User->>UI: Upload document files
+        UI->>UI: Calculate MD5 file hashes
+        alt Hashes Match Stored DB
+            UI-->>User: Skip indexing (Instant Ready)
+        else Hashes Changed / New Files
+            UI->>UI: Convert PDFs to Markdown & build GraphRAG Index
+            UI->>Chroma: Sync Entity Embeddings from Parquet
+            UI->>UI: Export graph_data.json
+        end
     end
-    RAG->>Ollama: Synthesize retrieved context into answer
-    Ollama-->>RAG: Return summarized context
-    RAG-->>Agent: Return retrieved search text
-    Agent->>Ollama: Generate agent response conversation
-    Ollama-->>Agent: Return response text
-    Agent-->>UI: Stream agent conversation messages
-    UI-->>User: Display final response & chat history
+    
+    User->>UI: Send search query / chat message
+    UI->>Router: Detect Query Intent
+    Router->>Ollama: Classify prompt as SEARCH or CONVERSATIONAL
+    Ollama-->>Router: Classification tag
+    
+    alt Conversational Chit-Chat
+        Router->>Agent: Route to Chatter Agent (Fast LLM config)
+        Agent->>Ollama: Generate small talk response
+        Ollama-->>Agent: Return response text
+    else Search factual query
+        Router->>Agent: Route to Retriever Agent (Heavy LLM config)
+        Agent->>Chroma: Run similarity query on query embedding
+        Chroma-->>Agent: Display matched entity names & summaries in UI
+        Agent->>RAG: Invoke query_graphRAG tool
+        RAG->>Ollama: Synthesize community context or local entities
+        Ollama-->>RAG: Return synthesized response
+        RAG-->>Agent: Return context text
+    end
+    Agent-->>UI: Stream response message
+    UI->>UI: Log turn asynchronously to SQLite DB
+    UI-->>User: Display final response
 ```
 
 ---
 
-## 🌟 Features
+## 🌟 Key Features
 
-* **Complete Data Privacy:** Runs entirely offline on your local CPU/GPU hardware. No prompts, queries, or documents are transmitted to external services.
-* **Knowledge Graph Construction:** Moves beyond basic chunk-similarity search by building semantic knowledge graphs representing entity connections, relationships, and hierarchical communities.
-* **Hybrid Search Options:** Supports targeted local queries (focusing on specific entities) and global synthesis (summarizing themes across the entire document corpus).
-* **Multi-Agent Orchestration:** Uses AutoGen agents to collaborate, review, and refine research findings before presenting them to the user.
-* **Highly Optimized Embeddings:** Uses a custom non-blocking AsyncClient batch embedding adapter to feed data efficiently to local embedding services.
+1. **Persistent SQLite Memory (WAL Mode):**
+   * Persists message logs and session tables using asynchronous SQLite (`aiosqlite`).
+   * Configures Write-Ahead Logging (WAL) and 5000ms busy timeout properties, preventing write contentions and locking conditions.
+   * Action buttons allow users to seamlessly **Resume Last Chat** or **Start New Workspace Sessions** on startup.
+2. **Multi-Model Orchestration:**
+   * Discovers local Ollama models dynamically on launch, assigning fast models (`gemma/phi3/qwen`) to conversational queries and heavy models (`llama3/mistral`) to deep context searches.
+   * Employs intent-based routing to bypass costly GraphRAG search routines when user inputs are simple greetings or pequeña chat.
+3. **Local Persistent Vector Store (ChromaDB):**
+   * Embeds entity metadata and names into a persistent local collection (`db/chroma`).
+   * Renders the top matched nodes inside the chat window before invoking GraphRAG search queries, showing users what references were found in the vector index.
+4. **Smart Incremental Indexing Engine:**
+   * Calculates MD5 hashes of uploaded documents and stores them in SQLite (`indexed_files`).
+   * Bypasses the heavy PDF-to-Markdown parser (Marker) and GraphRAG index creation if file hashes are unchanged, keeping setup instant.
+5. **Interactive 3D WebGL Graph Visualizer:**
+   * Reads node and relationship parquets and exports coordinates, type tags, and link connections to `public/graph_data.json`.
+   * Serves an interactive 3D WebGL page from `/public/graph_visualizer.html` featuring:
+     - **Legend Groups:** Filter and highlight nodes by entity type.
+     - **Spotlight Search:** Instantly filters matching entities and dims unrelated nodes.
+     - **Camera Navigation:** Click nodes to center the WebGL camera smoothly.
+     - **Detail Cards:** Displays complete entity details and connection weights on hover.
 
 ---
 
 ## 🚀 Quick Start (Local Setup)
 
 ### Prerequisites
-* **Python:** 3.10 or higher.
-* **Ollama:** Installed and running on `localhost:11434`.
+* **Python:** Version 3.10 or higher.
+* **Ollama:** Installed and running locally on port `11434`.
 
-### 1. Model Pulling
-Ensure you have pulled the required LLM and embedding models in Ollama:
+### 1. Pull Local Models
+Verify you have pulled the required LLM and embedding models in Ollama:
 ```bash
-# Pull the default LLM
+# Pull the default Reasoning LLM
 ollama pull llama3
 
-# Pull the default embedding model
+# Pull the default Embedding Model
 ollama pull nomic-embed-text
 ```
 
-### 2. Dependency Installation
-We recommend using **`uv`** for fast and secure virtual environment and package installation:
+### 2. Install Dependencies
+We recommend utilizing `uv` for fast package downloads:
 ```bash
 # Create virtual environment
 uv venv
 
-# Activate venv
+# Activate virtual environment
 source .venv/bin/activate
 
 # Install requirements
 uv pip install -r requirements.txt
 ```
 
-### 3. Initialize & Launch
-Run the automated script `run_project.sh` to initialize settings, patch the local GraphRAG library with Ollama compatibility wrappers, and launch the Chainlit interface:
+### 3. Launch the Project
+Run the startup script. It automatically verifies model presence, patches the GraphRAG package with Ollama-compatible adapters, and starts the UI:
 ```bash
 chmod +x run_project.sh
 ./run_project.sh
@@ -126,72 +177,55 @@ chmod +x run_project.sh
 
 ## ⚙️ Configuration Guide
 
-### GraphRAG Settings (`settings.yaml`)
-You can adjust search, chunking, and modeling behavior inside your root `settings.yaml` file:
+### Custom GraphRAG settings (`settings.yaml`)
+Configurations are defined inside your root `settings.yaml`. A default template is saved inside `templates/settings.yaml`.
+* **llm.type / embeddings.llm.type:** Configured as `openai_chat` and `openai_embedding` respectively.
+* **api_base:** Configured to point to Ollama's local endpoints (`http://localhost:11434/v1` and `http://localhost:11434/api`).
 
-```yaml
-llm:
-  model: mistral                  # Local LLM chat model
-  api_base: http://localhost:11434/v1
-
-embeddings:
-  llm:
-    model: nomic_embed_text       # Local embedding model
-    api_base: http://localhost:11434/api
-
-chunks:
-  size: 300                       # Input chunk size in tokens
-  overlap: 100                    # Overlap between consecutive chunks
-```
-
-### Agent Configuration (`app.py`)
-To change model parameters, timeouts, or system personas for the AutoGen agents, modify the initialization configurations inside `app.py`:
-- Modify the `system_message` on the `Retriever` or `User_Proxy` agents.
-- Customize the chat manager's `MAX_ITER` loop bounds.
+### Offline Mock Interfaces
+If you wish to test or preview the user interface styling locally without launching the Python server or downloading models, open these files directly in your browser:
+* **Mock Chat UI:** [public/mock_chat_ui.html](file:///home/alpha-square/Videos/Autogen_GraphRAG_Ollama-main/public/mock_chat_ui.html)
+* **Mock 3D Graph Visualizer:** [public/mock_graph_visualizer.html](file:///home/alpha-square/Videos/Autogen_GraphRAG_Ollama-main/public/mock_graph_visualizer.html)
 
 ---
 
 ## 🛠️ Developer Experience
 
-### Local Development Setup
-If you want to contribute or modify the codebase, initialize the development mode:
+### Local Linting & Formatting
+To keep code clean and maintain separation of concerns:
+```bash
+# Install toolchains
+pip install black flake8 mypy
 
-1. **Install Dev Dependencies:**
-   ```bash
-   uv pip install flake8 black mypy
-   ```
+# Check formatting
+black --check src/ app.py
 
-2. **Run Linting & Code Verification:**
-   Ensure files are linted and formatted:
-   ```bash
-   black --check src/ app.py
-   flake8 src/ app.py
-   mypy src/ app.py
-   ```
+# Lint checks
+flake8 src/ app.py
+```
 
-### Contribution Guidelines
-We welcome open-source contributions!
-1. Fork this repository.
-2. Create a feature branch: `git checkout -b feature/my-feature`.
-3. Verify changes with unit tests and code checks.
-4. Open a Pull Request with a clear description of the modifications.
+### Contribution Workflow
+1. Fork the project repository.
+2. Create a development feature branch: `git checkout -b feature/my-cool-feature`.
+3. Test changes locally using `run_project.sh` and offline mockup files.
+4. Ensure files are linted, then open a Pull Request.
 
 ---
 
-## 🛡️ Security & Privacy
+## 🛡️ Security & Privacy Audit
 
-This project follows secure-by-default standards:
-* **Zero Cloud Exposure:** Built specifically for secure air-gapped environments.
-* **Protected Port Binding:** Bound exclusively to `127.0.0.1` (localhost) to prevent external sniffing and unauthorized network requests.
-* **Git Safe Guarding:** Comes with a `.gitignore` configured to block indexing outputs (`output/`), document sources (`input/`), local cache directories (`cache/`), and environment files (`.env`) from leaking into public Git repositories.
-* **No Hardcoded Secrets:** Uses environment variable parsing (`${GRAPHRAG_API_KEY}`) to load API tokens dynamically when cloud configurations are enabled.
+* **100% Data Privacy:** Zero cloud connections. All prompts, indexing steps, and vector search operations are executed on your local device.
+* **Port Bindings:** The Chainlit development web server binds explicitly to localhost `127.0.0.1`, shielding active processes from network sniffers.
+* **Sensitive Exclusions:** `.gitignore` blocks source materials (`input/`), parquet outputs (`output/`), vector directories (`db/`), and configuration files (`settings.yaml`) from being pushed to public remotes.
+* **Credentials Management:** Relies on env string interpolation (`${GRAPHRAG_API_KEY}`) to load keys dynamically when cloud options are chosen.
 
 ---
 
 ## ⚡ Performance & Optimization
 
-* **Batch Embedding API:** The custom Ollama adapter handles batch queries dynamically, feeding lists of strings directly to Ollama in one HTTP request instead of invoking it in sequential blocks.
-* **Asynchronous Execution:** Async implementations of embedding generations are used (`AsyncClient.embed`) to prevent event loop blockages during search queries.
+* **Write-Ahead Logging (WAL):** Prevents database write blockages by writing message histories in parallel logs.
+* **Parallel Processing:** Uses PyTorch multi-process spawning for Marker layout conversions, matching VRAM constraints automatically.
+* **Non-Blocking Network Calls:** Interrogates Ollama using asynchronous client requests (`AsyncClient`), avoiding event loop starvation.
 
 ---
 

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OllaGraph 3D Knowledge Graph Visualizer</title>
+    <title>OllaGraph 3D Knowledge Graph Visualizer Mockup</title>
     <style>
         body {
             margin: 0;
@@ -279,13 +279,90 @@
         </div>
 
         <span class="section-label">Filter by Type</span>
-        <div class="filter-list" id="filter-container">
-            <!-- Populated from loaded data -->
+        <div class="filter-list">
+            <div class="filter-item">
+                <div class="filter-info">
+                    <span class="type-badge" style="background: #30d158;"></span>
+                    <span>Topics</span>
+                </div>
+                <span class="count-label">1.2k</span>
+                <label class="switch">
+                    <input type="checkbox" checked onchange="toggleFilter('Topic', this.checked)">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="filter-item">
+                <div class="filter-info">
+                    <span class="type-badge" style="background: #0a84ff;"></span>
+                    <span>Entities</span>
+                </div>
+                <span class="count-label">945</span>
+                <label class="switch">
+                    <input type="checkbox" checked onchange="toggleFilter('Entity', this.checked)">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="filter-item">
+                <div class="filter-info">
+                    <span class="type-badge" style="background: #ff9f0a;"></span>
+                    <span>Concepts</span>
+                </div>
+                <span class="count-label">712</span>
+                <label class="switch">
+                    <input type="checkbox" checked onchange="toggleFilter('Concept', this.checked)">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="filter-item">
+                <div class="filter-info">
+                    <span class="type-badge" style="background: #ff453a;"></span>
+                    <span>Events</span>
+                </div>
+                <span class="count-label">489</span>
+                <label class="switch">
+                    <input type="checkbox" checked onchange="toggleFilter('Event', this.checked)">
+                    <span class="slider"></span>
+                </label>
+            </div>
         </div>
 
         <span class="section-label">Color Legend</span>
-        <div class="legend-list" id="legend-container">
-            <!-- Populated from loaded data -->
+        <div class="legend-list">
+            <div class="legend-item">
+                <div class="filter-info">
+                    <span class="type-badge" style="background: #30d158;"></span>
+                    <span>Topic</span>
+                </div>
+                <span class="count-label" style="margin-right: 0;">1234</span>
+            </div>
+            <div class="legend-item">
+                <div class="filter-info">
+                    <span class="type-badge" style="background: #0a84ff;"></span>
+                    <span>Entity</span>
+                </div>
+                <span class="count-label" style="margin-right: 0;">987</span>
+            </div>
+            <div class="legend-item">
+                <div class="filter-info">
+                    <span class="type-badge" style="background: #ff9f0a;"></span>
+                    <span>Concept</span>
+                </div>
+                <span class="count-label" style="margin-right: 0;">436</span>
+            </div>
+            <div class="legend-item">
+                <div class="filter-info">
+                    <span class="type-badge" style="background: #ff453a;"></span>
+                    <span>Event</span>
+                </div>
+                <span class="count-label" style="margin-right: 0;">326</span>
+            </div>
+            <div class="legend-item">
+                <div class="filter-info">
+                    <span class="type-badge" style="background: #ffd60a;"></span>
+                    <span>Attribute</span>
+                </div>
+                <span class="count-label" style="margin-right: 0;">728</span>
+            </div>
         </div>
     </div>
 
@@ -298,6 +375,7 @@
     <div id="3d-graph"></div>
 
     <script>
+        // Saturated, vibrant color mappings matching design
         const colorMap = {
             'Topic': '#30d158',
             'Entity': '#0a84ff',
@@ -306,41 +384,53 @@
             'Attribute': '#ffd60a'
         };
 
-        const fallbackColors = ['#bf5af2', '#64d2ff', '#ff9f0a', '#ffd60a', '#30d158'];
-        let colorIdx = 0;
-
-        function getOrAssignColor(type) {
-            if (!colorMap[type]) {
-                colorMap[type] = fallbackColors[colorIdx % fallbackColors.length];
-                colorIdx++;
-            }
-            return colorMap[type];
-        }
+        const mockData = {
+            nodes: [
+                { id: "AutoGen", label: "AutoGen", type: "Entity", val: 12, description: "Multi-agent orchestration framework by Microsoft used to route tasks between models." },
+                { id: "GraphRAG", label: "GraphRAG", type: "Topic", val: 15, description: "Microsoft's Graph-based Retrieval-Augmented Generation that extracts entities and communities from local documents." },
+                { id: "Ollama", label: "Ollama", type: "Concept", val: 14, description: "Offline LLM engine running llama3, mistral, gemma, and phi3 models locally." },
+                { id: "ChromaDB", label: "ChromaDB", type: "Attribute", val: 8, description: "Local persistent vector store that holds entity description embeddings." },
+                { id: "SQLite", label: "SQLite", type: "Attribute", val: 9, description: "Relational database configured with WAL mode to persist chat sessions and file hashes." },
+                { id: "Mistral", label: "Mistral", type: "Event", val: 10, description: "7B parameter model chosen for deep RAG synthesis and community analysis." },
+                { id: "Gemma", label: "Gemma", type: "Event", val: 8, description: "Lightweight model by Google utilized for fast user intent routing." },
+                { id: "Marker", label: "Marker", type: "Concept", val: 7, description: "Deep learning tool used to parse PDF layouts into plain Markdown files." }
+            ],
+            links: [
+                { source: "Ollama", target: "AutoGen", weight: 3 },
+                { source: "Ollama", target: "GraphRAG", weight: 3 },
+                { source: "AutoGen", target: "GraphRAG", weight: 4 },
+                { source: "GraphRAG", target: "ChromaDB", weight: 2 },
+                { source: "GraphRAG", target: "SQLite", weight: 2 },
+                { source: "SQLite", target: "AutoGen", weight: 3 },
+                { source: "ChromaDB", target: "Mistral", weight: 2 },
+                { source: "Gemma", target: "Ollama", weight: 2 },
+                { source: "Marker", target: "GraphRAG", weight: 3 }
+            ]
+        };
 
         const infoCard = document.getElementById('info-card');
         const nodeTitle = document.getElementById('node-title');
         const nodeType = document.getElementById('node-type');
         const nodeDesc = document.getElementById('node-desc');
         const searchInput = document.getElementById('search-input');
-        const filterContainer = document.getElementById('filter-container');
-        const legendContainer = document.getElementById('legend-container');
-
-        let rawGraphData = { nodes: [], links: [] };
-        let activeFilters = {};
+        
+        let activeFilters = { 'Topic': true, 'Entity': true, 'Concept': true, 'Event': true, 'Attribute': true };
+        let filteredData = JSON.parse(JSON.stringify(mockData));
 
         // Initialize 3D Graph
         const Graph = ForceGraph3D()(document.getElementById('3d-graph'))
+            .graphData(filteredData)
             .showNavInfo(false)
             .linkWidth(link => link.weight || 2)
             .linkColor(() => 'rgba(255, 255, 255, 0.15)')
             
-            // Custom Three.js Node rendering
+            // Custom Three.js Node rendering for glowing spheres with text sprites
             .nodeThreeObject(node => {
                 const group = new THREE.Group();
-                const color = getOrAssignColor(node.type);
+                const color = colorMap[node.type] || '#ffffff';
                 
                 // Emissive glowing sphere
-                const size = Math.max(3, (node.val || 8) / 2.2);
+                const size = Math.max(3, node.val / 2.2);
                 const sphereGeo = new THREE.SphereGeometry(size, 20, 20);
                 const sphereMat = new THREE.MeshLambertMaterial({
                     color: color,
@@ -376,9 +466,9 @@
                 if (node) {
                     nodeTitle.innerText = node.label;
                     nodeType.innerText = node.type;
-                    nodeType.style.background = getOrAssignColor(node.type) + '25';
-                    nodeType.style.color = getOrAssignColor(node.type);
-                    nodeDesc.innerText = node.description || 'No description available.';
+                    nodeType.style.background = (colorMap[node.type] || '#ffffff') + '25';
+                    nodeType.style.color = colorMap[node.type] || '#ffffff';
+                    nodeDesc.innerText = node.description;
                     infoCard.classList.add('active');
                 } else {
                     infoCard.classList.remove('active');
@@ -394,73 +484,16 @@
                 );
             });
 
-        // Load json dataset dynamically
-        fetch('graph_data.json')
-            .then(res => res.json())
-            .then(data => {
-                rawGraphData = data;
-                
-                // Extract unique node types
-                const types = [...new Set(data.nodes.map(n => n.type))];
-                types.forEach(type => {
-                    activeFilters[type] = true;
-                    getOrAssignColor(type);
-                });
-                
-                buildFiltersAndLegends(types, data.nodes);
-                updateGraph();
-            })
-            .catch(err => {
-                console.error("Error loading graph data, falling back to mock dataset.", err);
-            });
-
-        function buildFiltersAndLegends(types, nodes) {
-            filterContainer.innerHTML = '';
-            legendContainer.innerHTML = '';
-            
-            types.forEach(type => {
-                const count = nodes.filter(n => n.type === type).length;
-                const color = getOrAssignColor(type);
-                
-                // Add filter toggle
-                const filterItem = document.createElement('div');
-                filterItem.className = 'filter-item';
-                filterItem.innerHTML = `
-                    <div class="filter-info">
-                        <span class="type-badge" style="background: ${color};"></span>
-                        <span>${type}s</span>
-                    </div>
-                    <span class="count-label">${count}</span>
-                    <label class="switch">
-                        <input type="checkbox" checked onchange="toggleFilter('${type}', this.checked)">
-                        <span class="slider"></span>
-                    </label>
-                `;
-                filterContainer.appendChild(filterItem);
-                
-                // Add legend
-                const legendItem = document.createElement('div');
-                legendItem.className = 'legend-item';
-                legendItem.innerHTML = `
-                    <div class="filter-info">
-                        <span class="type-badge" style="background: ${color};"></span>
-                        <span>${type}</span>
-                    </div>
-                    <span class="count-label" style="margin-right: 0;">${count}</span>
-                `;
-                legendContainer.appendChild(legendItem);
-            });
-        }
-
+        // Toggle visibility filters
         function toggleFilter(type, isChecked) {
             activeFilters[type] = isChecked;
-            updateGraph();
+            updateGraphData();
         }
 
-        function updateGraph() {
-            const newNodes = rawGraphData.nodes.filter(n => activeFilters[n.type]);
+        function updateGraphData() {
+            const newNodes = mockData.nodes.filter(n => activeFilters[n.type]);
             const nodeIds = new Set(newNodes.map(n => n.id));
-            const newLinks = rawGraphData.links.filter(l => nodeIds.has(l.source.id || l.source) && nodeIds.has(l.target.id || l.target));
+            const newLinks = mockData.links.filter(l => nodeIds.has(l.source.id || l.source) && nodeIds.has(l.target.id || l.target));
             
             Graph.graphData({ nodes: newNodes, links: newLinks });
         }
@@ -479,7 +512,7 @@
                     sphere.material.color.set('#333333');
                     sphere.material.emissive.set('#000000');
                 } else {
-                    const originalColor = getOrAssignColor(node.type);
+                    const originalColor = colorMap[node.type] || '#ffffff';
                     sphere.material.color.set(originalColor);
                     sphere.material.emissive.set(originalColor);
                 }
