@@ -1,0 +1,183 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* Main Body macOS-Style Gradient & Smooth Rendering */
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+    background: #09090e !important;
+    color: #f5f5f7 !important;
+    overflow-x: hidden;
+}
+
+/* Dynamic macOS Desktop Wallpaper Simulation Backdrop */
+body::before {
+    content: "";
+    position: fixed;
+    top: -50%;
+    left: -50%;
+    right: -50%;
+    bottom: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(at 15% 15%, rgba(120, 50, 190, 0.16) 0px, transparent 55%),
+                radial-gradient(at 85% 15%, rgba(20, 115, 230, 0.16) 0px, transparent 55%),
+                radial-gradient(at 50% 85%, rgba(240, 80, 160, 0.09) 0px, transparent 55%);
+    z-index: -1;
+    filter: blur(110px);
+    pointer-events: none;
+}
+
+/* Pure macOS Glassmorphism overrides for Chat Containers & Cards */
+.MuiPaper-root {
+    background: rgba(22, 22, 32, 0.5) !important;
+    backdrop-filter: blur(30px) !important;
+    -webkit-backdrop-filter: blur(30px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    border-radius: 20px !important;
+    box-shadow: 0 16px 45px 0 rgba(0, 0, 0, 0.45) !important;
+}
+
+/* macOS Window Title Bar with Traffic Lights */
+header {
+    background: rgba(14, 14, 22, 0.45) !important;
+    backdrop-filter: blur(20px) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07) !important;
+    position: relative !important;
+    padding-left: 80px !important; /* Offset for traffic lights */
+}
+
+/* Create the standard macOS red-yellow-green window decorations */
+header::before {
+    content: "";
+    position: absolute;
+    left: 24px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #ff5f56;
+    box-shadow: 20px 0 0 #ffbd2e, 40px 0 0 #27c93f;
+    opacity: 0.95;
+}
+
+/* Sidebar Drawers: Semi-transparent sidebar panel */
+.MuiDrawer-paper {
+    background: rgba(16, 16, 26, 0.45) !important;
+    backdrop-filter: blur(35px) !important;
+    -webkit-backdrop-filter: blur(35px) !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.07) !important;
+}
+
+/* Dialog and Popup Panels: Thick glass overlays */
+.MuiDialog-paper {
+    background: rgba(22, 22, 32, 0.8) !important;
+    backdrop-filter: blur(40px) !important;
+    -webkit-backdrop-filter: blur(40px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    border-radius: 24px !important;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* macOS Pill Buttons */
+.MuiButton-root {
+    border-radius: 20px !important;
+    text-transform: none !important;
+    font-weight: 500 !important;
+    letter-spacing: 0.2px;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.MuiButton-contained {
+    background: #007aff !important;
+    color: #ffffff !important;
+}
+
+.MuiButton-contained:hover {
+    background: #006ce6 !important;
+    box-shadow: 0 4px 15px rgba(0, 122, 255, 0.45) !important;
+}
+
+.MuiButton-outlined {
+    border: 1px solid rgba(255, 255, 255, 0.16) !important;
+    background: rgba(255, 255, 255, 0.05) !important;
+    color: #ffffff !important;
+}
+
+.MuiButton-outlined:hover {
+    background: rgba(255, 255, 255, 0.1) !important;
+    border-color: rgba(255, 255, 255, 0.25) !important;
+}
+
+/* Message Bubble customization (Apple iMessage style) */
+.message {
+    border-radius: 18px !important;
+    padding: 14px 20px !important;
+    font-size: 14.5px !important;
+    line-height: 1.51 !important;
+    max-width: 80% !important;
+}
+
+/* User Message: Apple Accent Blue */
+.message.user {
+    background: #007aff !important;
+    color: #ffffff !important;
+    border-bottom-right-radius: 4px !important;
+    margin-left: auto !important;
+}
+
+/* Assistant & System Messages: Soft dark glass card */
+.message.assistant, .message.system, .message.ChromaDB, .message.System {
+    background: rgba(255, 255, 255, 0.05) !important;
+    color: #f5f5f7 !important;
+    border-bottom-left-radius: 4px !important;
+    border: 1px solid rgba(255, 255, 255, 0.04) !important;
+}
+
+/* Drag-and-Drop Uploader Dropzone */
+.dropzone, [role="button"] {
+    background: rgba(255, 255, 255, 0.02) !important;
+    border: 2px dashed rgba(255, 255, 255, 0.12) !important;
+    border-radius: 16px !important;
+    transition: all 0.2s ease !important;
+}
+
+.dropzone:hover, [role="button"]:hover {
+    border-color: #007aff !important;
+    background: rgba(0, 122, 255, 0.06) !important;
+}
+
+/* Input Bar styled like Apple Spotlight Search */
+#chat-input {
+    background: rgba(255, 255, 255, 0.035) !important;
+    border: 1px solid rgba(255, 255, 255, 0.07) !important;
+    border-radius: 28px !important;
+    color: #ffffff !important;
+    padding: 14px 24px !important;
+    box-shadow: 0 4px 22px rgba(0, 0, 0, 0.2) !important;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+#chat-input:focus {
+    border-color: #007aff !important;
+    box-shadow: 0 0 0 4px rgba(0, 122, 255, 0.25) !important;
+    background: rgba(255, 255, 255, 0.055) !important;
+}
+
+/* Clean Custom Scrollbars */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.25);
+}

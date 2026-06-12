@@ -2,6 +2,9 @@ import autogen
 from rich import print
 import chainlit as cl
 import uuid
+import os
+import shutil
+import asyncio
 from typing import Annotated
 from chainlit.input_widget import (
    Select, Slider, Switch)
@@ -10,9 +13,79 @@ from src.agents import ChainlitUserProxyAgent, ChainlitAssistantAgent
 from graphrag.query.cli import run_global_search, run_local_search
 from src.adapters.db import DatabaseManager
 from src.adapters.vector_store import ChromaManager
-
 import requests
 import ollama
+
+async def run_indexing_pipeline(files, db_mgr, chroma_mgr, session_id):
+    try:
+        # Create directories
+        os.makedirs("input/pdfs", exist_ok=True)
+        os.makedirs("input/markdown", exist_ok=True)
+
+        status_msg = await cl.Message(content="📥 *Saving uploaded files to disk...*", author="System").send()
+
+        # Save files
+        for f in files:
+            dest_dir = "input/pdfs" if f.name.endswith(".pdf") else "input/markdown"
+            dest_name = f.name
+            if f.name.endswith(".txt"):
+                dest_name = f.name[:-4] + ".md"
+            
+            dest_path = os.path.join(dest_dir, dest_name)
+            shutil.copy(f.path, dest_path)
+            
+        await status_msg.update(content="📑 *Files saved. Launching marker PDF-to-Markdown parser...*")
+
+        # Run pdf_to_markdown converter
+        proc = await asyncio.create_subprocess_exec(
+            "python3", "-m", "src.tools.pdf_to_markdown",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            print(f"pdf_to_markdown error: {stderr.decode()}")
+            
+        await status_msg.update(content="⚡ *Parsing complete. Initiating GraphRAG Indexing (this may take a few minutes)...*")
+
+        # Run GraphRAG Indexing
+        proc = await asyncio.create_subprocess_exec(
+            "python3", "-m", "graphrag.index", "--root", ".",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        
+        # Stream progress logs
+        while True:
+            line = await proc.stdout.readline()
+            if not line:
+                break
+            line_str = line.decode().strip()
+            if "workflow" in line_str.lower() or "percent" in line_str.lower():
+                await status_msg.update(content=f"⚙️ *GraphRAG Indexing progress:*\n`{line_str}`")
+
+        await proc.wait()
+        
+        if proc.returncode != 0:
+            err_out = await proc.stderr.read()
+            await cl.Message(content=f"❌ *Indexing failed with error:*\n`{err_out.decode()[:500]}`", author="System").send()
+            return
+
+        await status_msg.update(content="🔄 *GraphRAG indexing complete. Synchronizing vector records to ChromaDB...*")
+
+        # Sync Parquet to ChromaDB
+        parquet_path = chroma_mgr.get_latest_output_parquet()
+        if parquet_path:
+            success = await cl.make_async(chroma_mgr.sync_entities_from_parquet)(parquet_path)
+            if success:
+                await status_msg.update(content="🎉 *Workspace successfully indexed! ChromaDB and GraphRAG are synchronized and ready to query.*")
+            else:
+                await status_msg.update(content="⚠️ *Indexing complete, but ChromaDB synchronization failed.*")
+        else:
+            await status_msg.update(content="⚠️ *Indexing complete, but could not locate the output parquet files.*")
+
+    except Exception as e:
+        await cl.Message(content=f"❌ *An unexpected error occurred during indexing: {str(e)}*", author="System").send()
 
 def get_optimal_models() -> tuple[str, str]:
     try:
@@ -187,8 +260,21 @@ async def on_chat_start():
             session_id = str(uuid.uuid4())
             await db_mgr.create_session(session_id, f"Session - {session_id[:8]}")
             cl.user_session.set("chat_session_id", session_id)
-            msg = cl.Message(content="Hello! What task would you like to get done today?", author="User_Proxy")
-            await msg.send()
+            
+            # Offer document uploader
+            await cl.Message(content="*Initiated a fresh workspace session.*", author="System").send()
+            files = await cl.AskFileMessage(
+                content="Would you like to upload document files (.pdf, .txt) to index into the knowledge graph? Or click Cancel to proceed with the existing index.",
+                accept=["application/pdf", "text/plain"],
+                max_files=5,
+                timeout=60
+            ).send()
+            
+            if files:
+                asyncio.create_task(run_indexing_pipeline(files, db_mgr, chroma_mgr, session_id))
+            else:
+                msg = cl.Message(content="Hello! What task would you like to get done today?", author="User_Proxy")
+                await msg.send()
         else:
             session_id = res.get("value") if res else sessions[0]["session_id"]
             cl.user_session.set("chat_session_id", session_id)
@@ -205,8 +291,21 @@ async def on_chat_start():
         session_id = str(uuid.uuid4())
         await db_mgr.create_session(session_id, f"Session - {session_id[:8]}")
         cl.user_session.set("chat_session_id", session_id)
-        msg = cl.Message(content="Hello! What task would you like to get done today?", author="User_Proxy")
-        await msg.send()
+        
+        # Offer document uploader
+        await cl.Message(content="*Initiated a fresh workspace session.*", author="System").send()
+        files = await cl.AskFileMessage(
+            content="Would you like to upload document files (.pdf, .txt) to index into the knowledge graph? Or click Cancel to proceed with the existing index.",
+            accept=["application/pdf", "text/plain"],
+            max_files=5,
+            timeout=60
+        ).send()
+        
+        if files:
+            asyncio.create_task(run_indexing_pipeline(files, db_mgr, chroma_mgr, session_id))
+        else:
+            msg = cl.Message(content="Hello! What task would you like to get done today?", author="User_Proxy")
+            await msg.send()
 
     print("Session ready.")
     

@@ -142,5 +142,4 @@ def single():
 
 
 if __name__ == "__main__":
-    single()
-    #multiple()
+    multiple()
