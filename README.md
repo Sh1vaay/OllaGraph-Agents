@@ -6,12 +6,13 @@
 [![GraphRAG Version](https://img.shields.io/badge/GraphRAG-0.3.0%2B-orange.svg)](https://github.com/microsoft/graphrag)
 [![Ollama Version](https://img.shields.io/badge/Ollama-0.4.0%2B-lightgrey.svg)](https://ollama.com/)
 
-OllaGraph-Agents is a private, secure, and fully offline hybrid RAG and Data Analysis system. It builds a semantic knowledge graph from local documents using **Microsoft GraphRAG**, orchestrates multi-agent group discussions using **AG2 (AutoGen)**, manages persistent session state and hashes using **SQLite**, indexes entity descriptions locally in **ChromaDB**, runs all LLM inference via **Ollama**, and serves a gorgeous macOS Glassmorphism web client built on **Chainlit** including a **3D WebGL Force-Directed Graph Visualizer** and a **Sandboxed Python Code Execution environment** that automatically renders agent-generated data charts.
+OllaGraph-Agents is a private, secure, and fully offline hybrid RAG and Data Analysis system. It builds a semantic knowledge graph from local documents using **Microsoft GraphRAG**, orchestrates multi-agent group discussions using **AG2 (AutoGen)**, manages persistent session state and hashes using **SQLite**, indexes entity descriptions locally in **ChromaDB**, runs all LLM inference via **Ollama**, and serves a gorgeous macOS Glassmorphism web client built on **Chainlit** including a **3D WebGL Force-Directed Graph Visualizer**, a **Sandboxed Python Code Execution environment**, and a **Maker-Checker Loop** featuring an Analyst and a Code Critic.
 
 ---
 
 ## 📖 Table of Contents
 * [System Architecture](#-system-architecture)
+* [Query Routing Decision Flow](#-query-routing-decision-flow)
 * [Application Flow](#-application-flow)
 * [Key Features](#-key-features)
 * [Quick Start (Local Setup)](#-quick-start-local-setup)
@@ -58,8 +59,49 @@ graph TD
     Sandbox -->|Execute Python| Executor[Local Code Executor]
     Executor -->|Return Logs & Charts| Retriever
     
+    Retriever -->|Proposed Responses & Code| Critic[Critic / Code Auditor Agent]
+    Critic -->|Audits & Feedback| Retriever
+    Critic -->|APPROVED Tag| Executor
+    
     Chatter -->|Fast LLM| OllamaChat[Ollama: gemma/phi3/qwen]
     Retriever -->|Heavy LLM| OllamaReason[Ollama: llama3/mistral]
+    Critic -->|Heavy LLM| OllamaReason
+```
+
+---
+
+## 🧠 Query Routing Decision Flow
+
+The following decision tree details how user requests are routed, analyzed, audited, and processed through different execution paths:
+
+```mermaid
+graph TD
+    Start([User input query / upload]) --> Upload{Is it a file upload?}
+    
+    %% Upload Path
+    Upload -->|Yes| FileType{File Type?}
+    FileType -->|Unstructured: .pdf, .txt| MD5_1{MD5 Hash Match?}
+    MD5_1 -->|Yes| InstantReady1([Instant Ready - Skip Indexing])
+    MD5_1 -->|No| Marker[Marker PDF-to-MD] --> GraphRAG[GraphRAG Indexing] --> Embed[Sync ChromaDB Embeddings] --> JSONExport[Export public/graph_data.json] --> Ready1([Index Ready])
+    
+    FileType -->|Structured: .csv, .xlsx| MD5_2{MD5 Hash Match?}
+    MD5_2 -->|Yes| InstantReady2([Instant Ready - Skip Ingestion])
+    MD5_2 -->|No| IngestSQLite[Ingest to SQLite structured_data.db] --> CopySandbox[Copy to coding/ Sandbox] --> Ready2([Tables Ready])
+
+    %% Query Path
+    Upload -->|No| Intent{Intent Router Classifies}
+    Intent -->|CONVERSATIONAL| ChatterAgent[Chatter Agent - Fast LLM] --> SmallTalk([Small Talk Response])
+    
+    Intent -->|SEARCH / ANALYTICAL| AnalystCritic{Maker-Checker Loop}
+    AnalystCritic -->|1. Analyst Proposes SQL/Code| CriticAudit[Critic Agent Audits Plan]
+    CriticAudit -->|Syntax or Logic Bugs| AnalystCritic
+    CriticAudit -->|APPROVED| ExecType{Execution Task Type?}
+    
+    ExecType -->|Factual / Conceptual Text| ChromaQuery[Query ChromaDB Entities] --> GraphRAGSearch[Execute GraphRAG Local/Global Search] --> FinalText([Stream Final Answer])
+    ExecType -->|Tabular / Calculation| SQLQuery[get_database_schema & execute SQL SELECT] --> FinalTable([Render Data Table])
+    ExecType -->|Data Visualization| PySandbox[Write & Run python script in coding/] --> ChartMatch{New image plotted?}
+    ChartMatch -->|Yes| UIPlot[Capture & Display Chart Inline] --> FinalPlot([Display Answer & Plot])
+    ChartMatch -->|No| UIPlotLogs[Display stdout/stderr Logs]
 ```
 
 ---
@@ -118,9 +160,14 @@ sequenceDiagram
             Agent->>Agent: Invoke query_database tool (Formulate SQL SELECT)
         else Data Visualization / Plotting Question
             Agent->>Agent: Generate Python plotting script
-            Agent->>Executor: Execute python block in coding/
-            Executor-->>Agent: Output logs & plot.png
-            Executor->>UI: Scan directory, copy plot to archive, display image inline
+            Agent->>Agent: Route to Critic Agent to audit script
+            alt Critic rejects
+                Agent->>Agent: Route back to Retriever to correct code
+            else Critic approves (returns APPROVED)
+                Agent->>Executor: Execute python block in coding/
+                Executor-->>Agent: Output logs & plot.png
+                Executor->>UI: Scan directory, copy plot to archive, display image inline
+            end
         else Semantic / Conceptual Question
             Agent->>Chroma: Run similarity query on query embedding
             Chroma-->>Agent: Display matched entity names & summaries in UI
@@ -146,21 +193,26 @@ sequenceDiagram
 2. **Multi-Model Orchestration & Dynamic Routing:**
    * Discovers local Ollama models dynamically on launch, assigning fast models (`gemma/phi3/qwen`) to conversational queries and heavy models (`llama3/mistral`) to deep context searches.
    * Employs intent-based routing to bypass costly GraphRAG search routines when user inputs are simple greetings.
-3. **Generalized Structured Table Querying (Text-to-SQL):**
+3. **Maker-Checker Agentic Loop (Self-Correction):**
+   * Implements a secure **Analyst-Critic** loop inside the search agent group chat.
+   * The `Retriever` (Analyst) proposes SQL/Python code or analytical answers.
+   * The `Critic` (Auditor) intercepts the draft, validates schema syntax, ensures no write-operations are present, and checks python import packages.
+   * Only once the Critic outputs the `"APPROVED"` tag does AutoGen execute the script or return the answer to the user.
+4. **Generalized Structured Table Querying (Text-to-SQL):**
    * Dynamically ingests `.csv`, `.xlsx`, and `.xls` files into a persistent SQLite database (`db/structured_data.db`).
    * Equips agents with schema discovery tools to inspect columns and write mathematically precise SQLite SELECT queries, eliminating LLM math errors.
    * Bypasses heavy document parsing and GraphRAG indexing when only spreadsheet files are uploaded.
-4. **Sandboxed Python Code Execution (Data Analyst):**
+5. **Sandboxed Python Code Execution (Data Analyst):**
    * Configures a local working directory (`coding/`) where the agents can read and write python scripts.
    * The custom `ChainlitUserProxyAgent` intercepts local executions and checks for newly created plots and charts.
    * Automatically copies generated image charts (`.png`, `.jpg`, `.jpeg`) to `coding/archive/` and renders them inline inside the Chainlit chat UI.
-5. **Local Persistent Vector Store (ChromaDB):**
+6. **Local Persistent Vector Store (ChromaDB):**
    * Embeds entity metadata and names into a persistent local collection (`db/chroma`).
    * Renders the top matched nodes inside the chat window before invoking GraphRAG search queries, showing users what references were found in the vector index.
-6. **Smart Incremental Indexing Engine:**
+7. **Smart Incremental Indexing Engine:**
    * Calculates MD5 hashes of uploaded documents and stores them in SQLite (`indexed_files`).
    * Bypasses the heavy PDF-to-Markdown parser (Marker) and GraphRAG index creation if file hashes are unchanged, keeping setup instant.
-7. **Interactive 3D WebGL Graph Visualizer:**
+8. **Interactive 3D WebGL Graph Visualizer:**
    * Reads node and relationship parquets and exports coordinates, type tags, and link connections to `public/graph_data.json`.
    * Serves an interactive 3D WebGL page from `/public/graph_visualizer.html` featuring:
      - **Legend Groups:** Filter and highlight nodes by entity type.
