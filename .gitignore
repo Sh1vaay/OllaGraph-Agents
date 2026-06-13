@@ -42,3 +42,8 @@ settings.yaml
 # Operating System Files
 .DS_Store
 Thumbs.db
+
+# Project documentation, state & Chainlit welcome page
+chainlit.md
+RESUME_POINTS.md
+IMPLEMENTATION_DETAILS.md

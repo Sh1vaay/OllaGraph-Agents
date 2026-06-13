@@ -7,4 +7,6 @@ marker-pdf
 torch
 aiosqlite
 chromadb
+pandas
+openpyxl
 

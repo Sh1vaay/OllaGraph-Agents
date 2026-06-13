@@ -14,6 +14,7 @@ from src.agents import ChainlitUserProxyAgent, ChainlitAssistantAgent
 from graphrag.query.cli import run_global_search, run_local_search
 from src.adapters.db import DatabaseManager
 from src.adapters.vector_store import ChromaManager
+from src.tools.table_db import ingest_table_file, get_db_schema, execute_sql_query
 import requests
 import ollama
 import subprocess
@@ -31,6 +32,7 @@ async def run_indexing_pipeline(files, db_mgr, chroma_mgr, session_id):
         # Create directories
         os.makedirs("input/pdfs", exist_ok=True)
         os.makedirs("input/markdown", exist_ok=True)
+        os.makedirs("input/tables", exist_ok=True)
 
         status_msg = await cl.Message(content="🔍 *Checking for document modifications (Incremental Engine)...*", author="System").send()
 
@@ -55,17 +57,32 @@ async def run_indexing_pipeline(files, db_mgr, chroma_mgr, session_id):
 
         # Save files and update their stored hashes in database
         has_pdfs = False
+        has_graphrag_docs = False
+        has_tables = False
+        
         for f, file_hash in new_or_changed_files:
-            dest_dir = "input/pdfs" if f.name.endswith(".pdf") else "input/markdown"
-            dest_name = f.name
-            if f.name.endswith(".pdf"):
-                has_pdfs = True
-            if f.name.endswith(".txt"):
-                dest_name = f.name[:-4] + ".md"
-            
-            dest_path = os.path.join(dest_dir, dest_name)
-            shutil.copy(f.path, dest_path)
-            await db_mgr.update_file_hash(f.name, file_hash)
+            lower_name = f.name.lower()
+            if lower_name.endswith((".csv", ".xlsx", ".xls")):
+                dest_dir = "input/tables"
+                dest_path = os.path.join(dest_dir, f.name)
+                shutil.copy(f.path, dest_path)
+                
+                # Ingest CSV/Excel to SQLite database
+                await cl.make_async(ingest_table_file)(dest_path, f.name)
+                has_tables = True
+                await db_mgr.update_file_hash(f.name, file_hash)
+            else:
+                dest_dir = "input/pdfs" if lower_name.endswith(".pdf") else "input/markdown"
+                dest_name = f.name
+                if lower_name.endswith(".pdf"):
+                    has_pdfs = True
+                if lower_name.endswith(".txt"):
+                    dest_name = f.name[:-4] + ".md"
+                
+                dest_path = os.path.join(dest_dir, dest_name)
+                shutil.copy(f.path, dest_path)
+                has_graphrag_docs = True
+                await db_mgr.update_file_hash(f.name, file_hash)
             
         # Run PDF-to-Markdown parsing only if new PDF files are uploaded!
         if has_pdfs:
@@ -79,44 +96,51 @@ async def run_indexing_pipeline(files, db_mgr, chroma_mgr, session_id):
             if proc.returncode != 0:
                 print(f"pdf_to_markdown error: {stderr.decode()}")
 
-        await status_msg.update(content="⚡ *Initiating GraphRAG Indexing (this may take a few minutes)...*")
+        if has_graphrag_docs:
+            await status_msg.update(content="⚡ *Initiating GraphRAG Indexing (this may take a few minutes)...*")
 
-        # Run GraphRAG Indexing
-        proc = await asyncio.create_subprocess_exec(
-            "python3", "-m", "graphrag.index", "--root", ".",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        
-        # Stream progress logs
-        while True:
-            line = await proc.stdout.readline()
-            if not line:
-                break
-            line_str = line.decode().strip()
-            if "workflow" in line_str.lower() or "percent" in line_str.lower():
-                await status_msg.update(content=f"⚙️ *GraphRAG Indexing progress:*\n`{line_str}`")
+            # Run GraphRAG Indexing
+            proc = await asyncio.create_subprocess_exec(
+                "python3", "-m", "graphrag.index", "--root", ".",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            
+            # Stream progress logs
+            while True:
+                line = await proc.stdout.readline()
+                if not line:
+                    break
+                line_str = line.decode().strip()
+                if "workflow" in line_str.lower() or "percent" in line_str.lower():
+                    await status_msg.update(content=f"⚙️ *GraphRAG Indexing progress:*\n`{line_str}`")
 
-        await proc.wait()
-        
-        if proc.returncode != 0:
-            err_out = await proc.stderr.read()
-            await cl.Message(content=f"❌ *Indexing failed with error:*\n`{err_out.decode()[:500]}`", author="System").send()
-            return
+            await proc.wait()
+            
+            if proc.returncode != 0:
+                err_out = await proc.stderr.read()
+                await cl.Message(content=f"❌ *Indexing failed with error:*\n`{err_out.decode()[:500]}`", author="System").send()
+                return
 
-        await status_msg.update(content="🔄 *GraphRAG indexing complete. Synchronizing vector records to ChromaDB...*")
+            await status_msg.update(content="🔄 *GraphRAG indexing complete. Synchronizing vector records to ChromaDB...*")
 
-        # Sync Parquet to ChromaDB
-        parquet_path = chroma_mgr.get_latest_output_parquet()
-        if parquet_path:
-            success = await cl.make_async(chroma_mgr.sync_entities_from_parquet)(parquet_path)
-            if success:
-                await cl.make_async(chroma_mgr.export_graph_to_json)()
-                await status_msg.update(content="🎉 *Workspace successfully indexed! ChromaDB and GraphRAG are synchronized and ready to query.*")
+            # Sync Parquet to ChromaDB
+            parquet_path = chroma_mgr.get_latest_output_parquet()
+            if parquet_path:
+                success = await cl.make_async(chroma_mgr.sync_entities_from_parquet)(parquet_path)
+                if success:
+                    await cl.make_async(chroma_mgr.export_graph_to_json)()
+                    await status_msg.update(content="🎉 *Workspace successfully indexed! ChromaDB and GraphRAG are synchronized and ready to query.*")
+                else:
+                    await status_msg.update(content="⚠️ *Indexing complete, but ChromaDB synchronization failed.*")
             else:
-                await status_msg.update(content="⚠️ *Indexing complete, but ChromaDB synchronization failed.*")
+                await status_msg.update(content="⚠️ *Indexing complete, but could not locate the output parquet files.*")
         else:
-            await status_msg.update(content="⚠️ *Indexing complete, but could not locate the output parquet files.*")
+            # If we only uploaded tables
+            if has_tables:
+                await status_msg.update(content="🎉 *Structured files successfully ingested! Tables are ready to query via SQL.*")
+            else:
+                await status_msg.update(content="ℹ️ *No new indexing required.*")
 
         # Prompt greeting message after successful indexing
         msg = cl.Message(content="Hello! What task would you like to get done today?\n\n🌐 *Tip: Visualizer is ready. [Open 3D Graph Visualizer](/public/graph_visualizer.html)*", author="User_Proxy")
@@ -235,8 +259,14 @@ async def on_chat_start():
     retriever   = AssistantAgent(
        name="Retriever", 
        llm_config=llm_config_heavy, 
-       system_message="""Only execute the function query_graphRAG to look for context. 
-                    Output 'TERMINATE' when an answer has been provided.""",
+       system_message="""You are a powerful Retrieval agent.
+To answer the user's question, you have access to three tools:
+1. `get_database_schema`: Call this first if the user asks any question about CSV/Excel files, structured tables, transactions, budgets, or numerical statistics.
+2. `query_database`: Call this to run read-only SQLite queries to calculate sums, averages, filter rows, or fetch tabular records from the ingested tables.
+3. `query_graphRAG`: Call this to query the GraphRAG knowledge graph for semantic, general, or relationship questions about text documents.
+
+Always first call `get_database_schema` if you need to know what tables and columns are available to write a valid query.
+Output 'TERMINATE' when a complete answer has been provided.""",
        max_consecutive_auto_reply=1,
        human_input_mode="NEVER", 
        description="Retriever Agent"
@@ -303,8 +333,14 @@ async def on_chat_start():
             # Offer document uploader
             await cl.Message(content="*Initiated a fresh workspace session.*", author="System").send()
             files = await cl.AskFileMessage(
-                content="Would you like to upload document files (.pdf, .txt) to index into the knowledge graph? Or click Cancel to proceed with the existing index.",
-                accept=["application/pdf", "text/plain"],
+                content="Would you like to upload files (.pdf, .txt, .csv, .xlsx) to index into the workspace? Or click Cancel to proceed.",
+                accept=[
+                    "application/pdf", 
+                    "text/plain", 
+                    "text/csv", 
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+                    "application/vnd.ms-excel"
+                ],
                 max_files=5,
                 timeout=60
             ).send()
@@ -334,8 +370,14 @@ async def on_chat_start():
         # Offer document uploader
         await cl.Message(content="*Initiated a fresh workspace session.*", author="System").send()
         files = await cl.AskFileMessage(
-            content="Would you like to upload document files (.pdf, .txt) to index into the knowledge graph? Or click Cancel to proceed with the existing index.",
-            accept=["application/pdf", "text/plain"],
+            content="Would you like to upload files (.pdf, .txt, .csv, .xlsx) to index into the workspace? Or click Cancel to proceed.",
+            accept=[
+                "application/pdf", 
+                "text/plain", 
+                "text/csv", 
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+                "application/vnd.ms-excel"
+            ],
             max_files=5,
             timeout=60
         ).send()
@@ -438,12 +480,47 @@ async def run_conversation(message: cl.Message):
         await cl.Message(content=result).send()
         return result
 
+    async def get_database_schema() -> str:
+        try:
+            result = await cl.make_async(get_db_schema)()
+            await cl.Message(content=f"📊 *Checking Database Schema:*\n\n{result}", author="Database Schema Tool").send()
+            return result
+        except Exception as e:
+            return f"Error retrieving schema: {str(e)}"
+
+    async def query_database(
+        sql_query: Annotated[str, 'SQLite SELECT query to run against the database. Example: SELECT * FROM table_name LIMIT 10']
+    ) -> str:
+        try:
+            await cl.Message(content=f"💻 *Executing SQL Query:*\n```sql\n{sql_query}\n```", author="SQL Query Tool").send()
+            result = await cl.make_async(execute_sql_query)(sql_query)
+            await cl.Message(content=result, author="SQL Query Tool").send()
+            return result
+        except Exception as e:
+            return f"Error executing query: {str(e)}"
+
     autogen.register_function(
         query_graphRAG,
         caller=retriever,
         executor=user_proxy,
         name="query_graphRAG",
         description="Retrieve content for question answering from the GraphRAG knowledge base.",
+    )
+
+    autogen.register_function(
+        get_database_schema,
+        caller=retriever,
+        executor=user_proxy,
+        name="get_database_schema",
+        description="Get schemas (table names, columns, and data types) of all dynamically ingested CSV or Excel tables in the database.",
+    )
+
+    autogen.register_function(
+        query_database,
+        caller=retriever,
+        executor=user_proxy,
+        name="query_database",
+        description="Execute a read-only SQL SELECT query against the structured database to do math, calculate metrics, sum, average, or retrieve tabular rows.",
     )
 
     groupchat = autogen.GroupChat(
