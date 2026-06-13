@@ -9,4 +9,6 @@ aiosqlite
 chromadb
 pandas
 openpyxl
+matplotlib
+seaborn
 

@@ -67,6 +67,11 @@ async def run_indexing_pipeline(files, db_mgr, chroma_mgr, session_id):
                 dest_path = os.path.join(dest_dir, f.name)
                 shutil.copy(f.path, dest_path)
                 
+                # Also copy to coding/ directory so Python scripts executed by AutoGen can read them locally
+                coding_dir = "coding"
+                os.makedirs(coding_dir, exist_ok=True)
+                shutil.copy(f.path, os.path.join(coding_dir, f.name))
+                
                 # Ingest CSV/Excel to SQLite database
                 await cl.make_async(ingest_table_file)(dest_path, f.name)
                 has_tables = True
@@ -259,13 +264,19 @@ async def on_chat_start():
     retriever   = AssistantAgent(
        name="Retriever", 
        llm_config=llm_config_heavy, 
-       system_message="""You are a powerful Retrieval agent.
+       system_message="""You are a powerful Retrieval and Data Analyst agent.
 To answer the user's question, you have access to three tools:
 1. `get_database_schema`: Call this first if the user asks any question about CSV/Excel files, structured tables, transactions, budgets, or numerical statistics.
 2. `query_database`: Call this to run read-only SQLite queries to calculate sums, averages, filter rows, or fetch tabular records from the ingested tables.
 3. `query_graphRAG`: Call this to query the GraphRAG knowledge graph for semantic, general, or relationship questions about text documents.
 
-Always first call `get_database_schema` if you need to know what tables and columns are available to write a valid query.
+Additionally, you can write and execute Python code blocks for data visualization, plotting charts, statistical analysis, or complex calculations.
+When writing Python code:
+- Always save any generated plots or charts as image files (e.g. `chart.png` or `sales_plot.png`) in the current directory so that the UI can render them inline.
+- You can access the raw uploaded CSV/Excel files directly by their filename in the current directory (e.g. `pd.read_csv("file_name.csv")`).
+- Clearly explain your python code block and why you are running it.
+
+Always first call `get_database_schema` if you need to know what tables and columns are available to write a valid SQL query or Python code.
 Output 'TERMINATE' when a complete answer has been provided.""",
        max_consecutive_auto_reply=1,
        human_input_mode="NEVER", 
@@ -277,18 +288,20 @@ Output 'TERMINATE' when a complete answer has been provided.""",
        llm_config=llm_config_fast,
        system_message="""You are a helpful local assistant. Respond to greetings, small talk, and general queries directly and concisely. Do not attempt to query the graph database.""",
        description="Conversational Agent"
-    )
+     )
 
     user_proxy = ChainlitUserProxyAgent(
         name="User_Proxy",
         human_input_mode="ALWAYS",
         llm_config=llm_config_fast,
         is_termination_msg=lambda x: x.get("content", "").rstrip().endswith("TERMINATE"),
-        code_execution_config=False,
+        code_execution_config={
+            "work_dir": "coding",
+            "use_docker": False,
+        },
         system_message='''A human admin. Interact with the retriever or chatter to provide context.''',
         description="User Proxy Agent"
     )
-    
     print("Set agents.")
 
     cl.user_session.set("Query Agent", user_proxy)

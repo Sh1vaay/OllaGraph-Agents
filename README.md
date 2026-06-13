@@ -6,7 +6,7 @@
 [![GraphRAG Version](https://img.shields.io/badge/GraphRAG-0.3.0%2B-orange.svg)](https://github.com/microsoft/graphrag)
 [![Ollama Version](https://img.shields.io/badge/Ollama-0.4.0%2B-lightgrey.svg)](https://ollama.com/)
 
-OllaGraph-Agents is a private, secure, and fully offline Retrieval-Augmented Generation (RAG) system. It builds a semantic knowledge graph from local documents using **Microsoft GraphRAG**, orchestrates multi-agent group discussions using **AG2 (AutoGen)**, manages persistent session state and hashes using **SQLite**, indexes entity descriptions locally in **ChromaDB**, runs all LLM inference via **Ollama**, and serves a gorgeous macOS Glassmorphism web client built on **Chainlit** including a **3D WebGL Force-Directed Graph Visualizer**.
+OllaGraph-Agents is a private, secure, and fully offline hybrid RAG and Data Analysis system. It builds a semantic knowledge graph from local documents using **Microsoft GraphRAG**, orchestrates multi-agent group discussions using **AG2 (AutoGen)**, manages persistent session state and hashes using **SQLite**, indexes entity descriptions locally in **ChromaDB**, runs all LLM inference via **Ollama**, and serves a gorgeous macOS Glassmorphism web client built on **Chainlit** including a **3D WebGL Force-Directed Graph Visualizer** and a **Sandboxed Python Code Execution environment** that automatically renders agent-generated data charts.
 
 ---
 
@@ -30,28 +30,33 @@ The following diagram illustrates the relationship between the front-end interfa
 ```mermaid
 graph TD
     User[User] -->|Interacts| UI[Chainlit Web UI]
-    UI -->|Session Queries| DB[SQLite DB - Memory/WAL]
-    UI -->|Drag & Drop Files| Index[Incremental Indexing Engine]
-    Index -->|Checksum Bypass| HashCheck{MD5 Hash Match?}
-    HashCheck -->|No - PDF/Txt| Marker[Marker PDF-to-MD]
+    UI -->|Session History| DB[SQLite DB: chat_history.db]
+    UI -->|Upload Documents| Index[Incremental Indexing Engine]
+    
+    Index -->|File Checksum| HashCheck{MD5 Hash Match?}
+    HashCheck -->|No - PDFs/Txt| Marker[Marker PDF-to-MD Converter]
     Marker -->|Runs GraphRAG| GraphRAG[GraphRAG Indexer]
     GraphRAG -->|Parquet Output| Sync[Vector & Graph Sync]
     Sync -->|Sync Vectors| Chroma[ChromaDB Vector Store]
-    Sync -->|Export Nodes| GraphData[graph_data.json]
+    Sync -->|Export Nodes| GraphJSON[public/graph_data.json]
     
-    HashCheck -->|No - CSV/Excel| Ingest[Table Ingest Engine]
-    Ingest -->|Writes Tables| TableDB[(SQLite: structured_data.db)]
+    HashCheck -->|No - CSV/Excel| Ingest[Table Ingestion Engine]
+    Ingest -->|Write SQLite| TableDB[(SQLite: structured_data.db)]
+    Ingest -->|Copy Table| Sandbox[coding/ directory]
     
     UI -->|Open 3D Visualizer| WebGL[3D WebGL Graph Visualizer]
-    GraphData -->|Loads Structure| WebGL
+    GraphJSON -->|Loads Structure| WebGL
     
-    UI -->|Sends Message| Orchestrator[Multi-Model Intent Router]
-    Orchestrator -->|Conversational Intent| Chatter[Conversational Chatter Agent]
-    Orchestrator -->|Factual/Search Intent| Retriever[GraphRAG & Database Retriever]
+    UI -->|Sends Message| Router[Multi-Model Intent Router]
+    Router -->|Conversational Intent| Chatter[Conversational Agent]
+    Router -->|Factual/Search Intent| Retriever[Retriever & Data Analyst Agent]
     
     Retriever -->|Similarity Query| Chroma
     Retriever -->|Local/Global Search| GraphRAGSearch[GraphRAG Search Runner]
-    Retriever -->|Text-to-SQL Query| TableDB
+    Retriever -->|Text-to-SQL| TableDB
+    Retriever -->|Write Script| Sandbox
+    Sandbox -->|Execute Python| Executor[Local Code Executor]
+    Executor -->|Return Logs & Charts| Retriever
     
     Chatter -->|Fast LLM| OllamaChat[Ollama: gemma/phi3/qwen]
     Retriever -->|Heavy LLM| OllamaReason[Ollama: llama3/mistral]
@@ -70,6 +75,7 @@ sequenceDiagram
     participant UI as "Chainlit Web UI"
     participant Router as "Intent Router"
     participant Agent as "AutoGen Agent Group"
+    participant Executor as "Local Code Executor"
     participant Chroma as "ChromaDB Store"
     participant RAG as "GraphRAG Search"
     participant Ollama as "Ollama Local Service"
@@ -90,7 +96,8 @@ sequenceDiagram
                 UI->>Chroma: Sync Entity Embeddings from Parquet
                 UI->>UI: Export graph_data.json
             else Structured Tables (.csv, .xlsx)
-                UI->>UI: Parse tables & Ingest to SQL (Instant)
+                UI->>UI: Parse tables & Ingest to SQLite
+                UI->>UI: Copy tables to coding/ directory
             end
         end
     end
@@ -109,6 +116,11 @@ sequenceDiagram
         alt Tabular / Numerical Question
             Agent->>Agent: Invoke get_database_schema tool
             Agent->>Agent: Invoke query_database tool (Formulate SQL SELECT)
+        else Data Visualization / Plotting Question
+            Agent->>Agent: Generate Python plotting script
+            Agent->>Executor: Execute python block in coding/
+            Executor-->>Agent: Output logs & plot.png
+            Executor->>UI: Scan directory, copy plot to archive, display image inline
         else Semantic / Conceptual Question
             Agent->>Chroma: Run similarity query on query embedding
             Chroma-->>Agent: Display matched entity names & summaries in UI
@@ -138,13 +150,17 @@ sequenceDiagram
    * Dynamically ingests `.csv`, `.xlsx`, and `.xls` files into a persistent SQLite database (`db/structured_data.db`).
    * Equips agents with schema discovery tools to inspect columns and write mathematically precise SQLite SELECT queries, eliminating LLM math errors.
    * Bypasses heavy document parsing and GraphRAG indexing when only spreadsheet files are uploaded.
-4. **Local Persistent Vector Store (ChromaDB):**
+4. **Sandboxed Python Code Execution (Data Analyst):**
+   * Configures a local working directory (`coding/`) where the agents can read and write python scripts.
+   * The custom `ChainlitUserProxyAgent` intercepts local executions and checks for newly created plots and charts.
+   * Automatically copies generated image charts (`.png`, `.jpg`, `.jpeg`) to `coding/archive/` and renders them inline inside the Chainlit chat UI.
+5. **Local Persistent Vector Store (ChromaDB):**
    * Embeds entity metadata and names into a persistent local collection (`db/chroma`).
    * Renders the top matched nodes inside the chat window before invoking GraphRAG search queries, showing users what references were found in the vector index.
-5. **Smart Incremental Indexing Engine:**
+6. **Smart Incremental Indexing Engine:**
    * Calculates MD5 hashes of uploaded documents and stores them in SQLite (`indexed_files`).
    * Bypasses the heavy PDF-to-Markdown parser (Marker) and GraphRAG index creation if file hashes are unchanged, keeping setup instant.
-6. **Interactive 3D WebGL Graph Visualizer:**
+7. **Interactive 3D WebGL Graph Visualizer:**
    * Reads node and relationship parquets and exports coordinates, type tags, and link connections to `public/graph_data.json`.
    * Serves an interactive 3D WebGL page from `/public/graph_visualizer.html` featuring:
      - **Legend Groups:** Filter and highlight nodes by entity type.
@@ -233,8 +249,9 @@ flake8 src/ app.py
 
 * **100% Data Privacy:** Zero cloud connections. All prompts, indexing steps, and vector search operations are executed on your local device.
 * **Port Bindings:** The Chainlit development web server binds explicitly to localhost `127.0.0.1`, shielding active processes from network sniffers.
-* **Sensitive Exclusions:** `.gitignore` blocks source materials (`input/`), parquet outputs (`output/`), vector directories (`db/`), and configuration files (`settings.yaml`) from being pushed to public remotes.
+* **Sensitive Exclusions:** `.gitignore` blocks source materials (`input/`), parquet outputs (`output/`), vector directories (`db/`), execution directories (`coding/`), and configuration files (`settings.yaml`) from being pushed to public remotes.
 * **Credentials Management:** Relies on env string interpolation (`${GRAPHRAG_API_KEY}`) to load keys dynamically when cloud options are chosen.
+* **Sandboxed Code Execution Guard:** While the agent executes Python code directly on the host machine, security is maintained via `human_input_mode="ALWAYS"` on the `User_Proxy` agent. This guarantees that **no code will be executed without the user's manual review and approval**.
 
 ---
 
