@@ -11,4 +11,6 @@ pandas
 openpyxl
 matplotlib
 seaborn
+langfuse
+
 

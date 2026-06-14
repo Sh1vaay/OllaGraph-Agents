@@ -1,6 +1,13 @@
+from dotenv import load_dotenv
+load_dotenv()
+
+from src.adapters.observability import setup_observability
+setup_observability()
+
 import autogen
 from rich import print
 import chainlit as cl
+
 import uuid
 import os
 import shutil

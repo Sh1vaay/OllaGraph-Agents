@@ -220,6 +220,11 @@ sequenceDiagram
      - **Camera Navigation:** Click nodes to center the WebGL camera smoothly.
      - **Detail Cards:** Displays complete entity details and connection weights on hover.
 
+9. **Asynchronous LLM Observability (Langfuse):**
+   * Automatically traces all Ollama completions, agent prompts, model tokens, and response latencies.
+   * Leverages global module monkeypatching at application startup to capture traces non-invasively.
+   * Gracefully falls back to normal execution if Langfuse keys are absent, keeping the offline setup fully functional.
+
 ---
 
 ## 🚀 Quick Start (Local Setup)
@@ -266,6 +271,16 @@ chmod +x run_project.sh
 Configurations are defined inside your root `settings.yaml`. A default template is saved inside `templates/settings.yaml`.
 * **llm.type / embeddings.llm.type:** Configured as `openai_chat` and `openai_embedding` respectively.
 * **api_base:** Configured to point to Ollama's local endpoints (`http://localhost:11434/v1` and `http://localhost:11434/api`).
+
+### Observability Configuration (`.env`)
+To enable Langfuse tracing:
+1. Create a `.env` file in the root workspace directory.
+2. Add your Langfuse keys (sign up at [langfuse.com](https://langfuse.com) or self-host a local instance):
+```bash
+LANGFUSE_PUBLIC_KEY=pk-lf-your-public-key
+LANGFUSE_SECRET_KEY=sk-lf-your-secret-key
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
+```
 
 ### Offline Mock Interfaces
 If you wish to test or preview the user interface styling locally without launching the Python server or downloading models, open these files directly in your browser:
